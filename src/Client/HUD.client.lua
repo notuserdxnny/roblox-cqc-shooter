@@ -111,7 +111,7 @@ hint.Font = Enum.Font.Gotham
 hint.TextSize = 16
 hint.TextColor3 = Color3.fromRGB(230, 230, 240)
 hint.TextStrokeTransparency = 0.5
-hint.Text = "CQC Blaster · Equip · Hold LMB · R reload · Hitmarkers on confirmed hits"
+hint.Text = "FPS lock-on · CQC Blaster · Hold LMB · R reload · Doors: ProximityPrompt · Jump half-walls / slide crawl gaps"
 hint.Parent = gui
 
 -- Kill feed

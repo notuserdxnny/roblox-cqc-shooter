@@ -4,6 +4,9 @@
 	hold LMB to fire, R to reload.
 	Camera recoil / FOV kick, muzzle flash, tracers, layered fire sounds.
 	Hitmarkers / damage numbers driven by server FireResult (real hits only).
+
+	CRITICAL: recoil ONLY rotates Camera CFrame via a local offset.
+	Never writes HumanoidRootPart / character CFrame / Tool grip.
 ]]
 
 local Players = game:GetService("Players")
@@ -61,7 +64,6 @@ local function makeMarkArm(rot: number, color: Color3): Frame
 	return arm
 end
 
--- X-shaped hitmarker arms (will recolor for headshot)
 local markArms = {
 	makeMarkArm(45, Color3.fromRGB(255, 255, 255)),
 	makeMarkArm(-45, Color3.fromRGB(255, 255, 255)),
@@ -124,13 +126,15 @@ local function flashMuzzle(tool: Tool)
 		flash.CanQuery = false
 		flash.Massless = true
 		flash.CastShadow = false
+		flash.Anchored = false
+		-- Align BEFORE welding so WeldConstraint never yanks the tool/character
+		flash.CFrame = muzzle.CFrame
 		flash.Parent = tool
 
 		local weld = Instance.new("WeldConstraint")
 		weld.Part0 = muzzle
 		weld.Part1 = flash
 		weld.Parent = flash
-		flash.CFrame = muzzle.CFrame
 	end
 
 	flash.Transparency = 0.15
@@ -156,7 +160,13 @@ local function flashMuzzle(tool: Tool)
 	end)
 end
 
-local activeRecoil = 0
+--[[
+	Camera-only recoil: accumulate pitch/yaw radians, apply as a post-camera
+	rotation each frame. Never touches character / HRP / Humanoid.CameraOffset
+	in a way that moves the body (we leave CameraOffset alone).
+]]
+local recoilPitch = 0 -- radians, positive = look up
+local recoilYaw = 0
 local activeFovKick = 0
 local baseFov: number? = nil
 
@@ -171,14 +181,15 @@ local function punchRecoil()
 
 	local pitch = math.rad(feel.RecoilPitchDegrees * (0.75 + math.random() * 0.5))
 	local yaw = math.rad(feel.RecoilYawDegrees * (math.random() * 2 - 1))
-	-- Apply immediate camera punch
-	cam.CFrame = cam.CFrame * CFrame.Angles(pitch, yaw, 0)
-	activeRecoil = 1
+	recoilPitch += pitch
+	recoilYaw += yaw
 	activeFovKick = feel.FovKick
 	cam.FieldOfView = (baseFov :: number) + activeFovKick
 end
 
-RunService.RenderStepped:Connect(function(dt)
+-- Late camera priority so we layer on top of Roblox's LockFirstPerson camera
+-- without fighting character position.
+RunService:BindToRenderStep("CQC_CameraRecoil", Enum.RenderPriority.Camera.Value + 1, function(dt)
 	local cam = workspace.CurrentCamera
 	if not cam then
 		return
@@ -187,12 +198,23 @@ RunService.RenderStepped:Connect(function(dt)
 		baseFov = cam.FieldOfView
 	end
 
-	if activeRecoil > 0 then
+	-- Apply recoil as camera-space rotation only (does not move HRP)
+	if math.abs(recoilPitch) > 1e-5 or math.abs(recoilYaw) > 1e-5 then
+		cam.CFrame = cam.CFrame * CFrame.Angles(recoilPitch, recoilYaw, 0)
+	end
+
+	-- Recover offsets toward zero (camera will follow next frame)
+	if recoilPitch ~= 0 or recoilYaw ~= 0 then
 		local recover = dt / math.max(0.01, feel.RecoilRecoverSeconds)
-		local step = math.min(activeRecoil, recover)
-		-- Ease camera back down slightly (complement punch)
-		cam.CFrame = cam.CFrame * CFrame.Angles(-math.rad(feel.RecoilPitchDegrees) * step * 0.85, 0, 0)
-		activeRecoil = math.max(0, activeRecoil - recover)
+		local decay = math.clamp(recover, 0, 1)
+		recoilPitch *= (1 - decay)
+		recoilYaw *= (1 - decay)
+		if math.abs(recoilPitch) < 1e-4 then
+			recoilPitch = 0
+		end
+		if math.abs(recoilYaw) < 1e-4 then
+			recoilYaw = 0
+		end
 	end
 
 	if activeFovKick > 0 and baseFov then
@@ -343,14 +365,12 @@ local function onFireResult(payload: any)
 		return
 	end
 
-	-- Confirmed shot: recoil, flash, sounds, tracers
 	punchRecoil()
 	if tool then
 		flashMuzzle(tool)
 		local muzzle = getMuzzlePart(tool)
 		if muzzle then
 			playSoundAt(muzzle, soundIds.Fire, volumes.Fire)
-			-- Layered crack for weight
 			task.delay(0.02, function()
 				if muzzle.Parent then
 					playSoundAt(muzzle, soundIds.FireAlt, volumes.FireAlt, 1.05 + math.random() * 0.1)
@@ -367,7 +387,6 @@ local function onFireResult(payload: any)
 		end
 	end
 
-	-- Hit feedback only when server confirms
 	if payload.anyHit == true and typeof(payload.hits) == "table" then
 		local headshot = payload.anyHeadshot == true
 		showHitMarker(headshot)
@@ -463,6 +482,8 @@ end
 local function onCharacter(character: Model)
 	equippedTool = nil
 	holding = false
+	recoilPitch = 0
+	recoilYaw = 0
 	watchContainer(character)
 	local backpack = player:FindFirstChild("Backpack") or player:WaitForChild("Backpack")
 	watchContainer(backpack)
