@@ -160,6 +160,31 @@ function WeaponService.StripAll(player: Player)
 	stripWeapons(player)
 end
 
+--[[
+	Server-side Tool.Activated for Knife — guarantees melee registers even if
+	the client MeleeAttack remote path fails silently.
+]]
+local function bindKnifeActivated(player: Player, knife: Tool)
+	if knife:GetAttribute("CQCMeleeBound") == true then
+		return
+	end
+	knife:SetAttribute("CQCMeleeBound", true)
+	knife.Activated:Connect(function()
+		if not CombatService.IsInMatch(player) then
+			return
+		end
+		local character = player.Character
+		if not character or knife.Parent ~= character then
+			return
+		end
+		local head = character:FindFirstChild("Head") :: BasePart?
+		local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+		local origin = if head then head.Position elseif root then root.Position + Vector3.new(0, 1.2, 0) else Vector3.zero
+		local look = if root then root.CFrame.LookVector else Vector3.zAxis
+		CombatService.HandleMelee(player, origin, look)
+	end)
+end
+
 function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?, mode: string?)
 	local resolvedMode = mode or getGameMode().GetMode(player) or Config.DefaultMode
 	if resolvedMode ~= Config.Modes.OITC and resolvedMode ~= Config.Modes.Casual then
@@ -198,6 +223,7 @@ function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?, m
 
 			local knife = getKnifeTemplate():Clone()
 			knife.Parent = backpack or character
+			bindKnifeActivated(player, knife)
 		else
 			for _, id in Config.WeaponOrder do
 				local tool = getTemplate(id):Clone()

@@ -132,6 +132,20 @@ local function equippedWeapon(player: Player): (Config.WeaponDef?, Tool?)
 	return nil, nil
 end
 
+local function equippedKnife(player: Player): Tool?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	local knifeName = Config.OITC.MeleeToolName
+	for _, child in character:GetChildren() do
+		if child:IsA("Tool") and (child.Name == knifeName or child:GetAttribute("IsMelee") == true) then
+			return child
+		end
+	end
+	return nil
+end
+
 local function magDisplay(player: Player, def: Config.WeaponDef): number
 	if isOITC(player) then
 		return Config.OITC.MagazineDisplay
@@ -506,11 +520,13 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	end
 	local ammo = state.ammoByWeapon[def.Id] or 0
 	if ammo <= 0 then
-		sendFireResult(player, { kind = "empty", ammo = 0, weaponId = def.Id, meleeReady = isOITC(player) })
 		if isOITC(player) then
-			-- No auto-reload in OITC — client should melee
+			-- LMB with empty magazine = melee (classic OITC). Also equip knife.
+			CombatService.TryEquipMelee(player)
+			CombatService.HandleMelee(player, origin, lookVector)
 			return
 		end
+		sendFireResult(player, { kind = "empty", ammo = 0, weaponId = def.Id, meleeReady = false })
 		CombatService.StartReload(player)
 		return
 	end
@@ -641,8 +657,10 @@ function CombatService.HandleMelee(player: Player, origin: any, lookVector: any)
 	end
 
 	local ammo = state.ammoByWeapon[Config.OITC.WeaponId] or 0
-	if ammo > 0 then
-		-- Still have bullets — use gun, not melee
+	local holdingKnife = equippedKnife(player) ~= nil
+	-- Allow melee when knife is equipped OR when out of bullets.
+	-- (Previously ammo>0 always blocked — knife Tool.Activated did nothing after a kill refill.)
+	if ammo > 0 and not holdingKnife then
 		return
 	end
 
@@ -679,9 +697,9 @@ function CombatService.HandleMelee(player: Player, origin: any, lookVector: any)
 	local hits: { [string]: any } = {}
 	local hitHuman = false
 
-	if result then
-		endPos = result.Position
-		local hitHumanoid, hitModel = resolveHumanoid(result.Instance)
+	local function applyMeleeHit(hitResult: RaycastResult)
+		endPos = hitResult.Position
+		local hitHumanoid, hitModel = resolveHumanoid(hitResult.Instance)
 		if hitHumanoid and hitModel then
 			local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
 			if hitPlayer ~= player and (Config.Combat.FriendlyFire or not hitPlayer) then
@@ -690,10 +708,10 @@ function CombatService.HandleMelee(player: Player, origin: any, lookVector: any)
 				hitHumanoid:TakeDamage(dmg)
 				hitHuman = true
 				table.insert(hits, {
-					position = result.Position,
+					position = hitResult.Position,
 					damage = dmg,
 					headshot = false,
-					partName = result.Instance.Name,
+					partName = hitResult.Instance.Name,
 					victim = hitModel.Name,
 					melee = true,
 				})
@@ -701,6 +719,17 @@ function CombatService.HandleMelee(player: Player, origin: any, lookVector: any)
 					creditKill(player, state, hitPlayer, hitModel, true, Config.OITC.WeaponId)
 				end
 			end
+		end
+	end
+
+	if result then
+		applyMeleeHit(result)
+	else
+		-- Fallback: forward from HRP (helps if camera origin was clipped)
+		local rootLook = root.CFrame.LookVector
+		local fallback = workspace:Raycast(root.Position + Vector3.new(0, 1.2, 0), rootLook * range, params)
+		if fallback then
+			applyMeleeHit(fallback)
 		end
 	end
 

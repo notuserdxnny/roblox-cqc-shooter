@@ -25,6 +25,7 @@ local statsRemote: RemoteEvent? = nil
 -- Late-bound to avoid circular require at load time
 local CombatService: any = nil
 local WeaponService: any = nil
+local LobbyService: any = nil
 
 local function getRemotes()
 	if remotesFolder and matchEndedRemote and returnToHubRemote then
@@ -57,6 +58,9 @@ local function bindDeps()
 	end
 	if not WeaponService then
 		WeaponService = require(script.Parent:WaitForChild("WeaponService"))
+	end
+	if not LobbyService then
+		LobbyService = require(script.Parent:WaitForChild("LobbyService"))
 	end
 end
 
@@ -200,6 +204,8 @@ function GameModeService.ReturnPlayerToHub(player: Player)
 	playerMode[player] = Config.DefaultMode
 	player:SetAttribute("CQCMode", Config.DefaultMode)
 	player:SetAttribute("CQCInMatch", false)
+	player:SetAttribute("CQCInHub", true)
+	LobbyService.TeleportToLobby(player)
 	if returnToHubRemote then
 		returnToHubRemote:FireClient(player, { reason = "hub" })
 	end
@@ -214,6 +220,7 @@ function GameModeService.StartMatch(player: Player, modeRaw: any, weaponIdRaw: a
 	GameModeService.ResetPlayer(player)
 	matchOver[player] = false
 	player:SetAttribute("CQCMatchOver", false)
+	player:SetAttribute("CQCInHub", false)
 
 	local weaponId = Config.DefaultWeaponId
 	if mode == Config.Modes.OITC then
@@ -222,6 +229,8 @@ function GameModeService.StartMatch(player: Player, modeRaw: any, weaponIdRaw: a
 		weaponId = weaponIdRaw
 	end
 
+	-- Leave lobby → combat START pads, then grant loadout
+	LobbyService.EnterMatch(player)
 	WeaponService.GiveLoadout(player, weaponId, mode)
 end
 
