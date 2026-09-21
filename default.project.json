@@ -22,8 +22,7 @@
       "$properties": {
         "CameraMode": "LockFirstPerson",
         "CameraMinZoomDistance": 0.5,
-        "CameraMaxZoomDistance": 0.5,
-        "DevEnableMouseLock": false
+        "CameraMaxZoomDistance": 0.5
       },
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
@@ -41,9 +40,17 @@
     "Lighting": {
       "$className": "Lighting",
       "$properties": {
-        "Ambient": [0.22, 0.23, 0.27],
+        "Ambient": [
+          0.22,
+          0.23,
+          0.27
+        ],
         "Brightness": 1.4,
-        "OutdoorAmbient": [0.16, 0.16, 0.20],
+        "OutdoorAmbient": [
+          0.16,
+          0.16,
+          0.2
+        ],
         "ClockTime": 22,
         "GeographicLatitude": 25,
         "GlobalShadows": true
