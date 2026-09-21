@@ -2,7 +2,7 @@
 
 Short-range **first-person** room shooter for **Roblox Studio** / **Rojo**.
 
-**Game is One in the Chamber (OITC) only for now.** You begin in a dedicated **Lobby** with a full-screen **hub** (**Play | Shop | Inventory | Settings**). Press **START** for a **3…2…1…GO!** countdown, then fight in a **3×3 room grid** with doors, half-walls, and crawl gaps. Server-authoritative combat, **Credits** economy, cosmetic shop (Part-based pistol/knife skins), and polished gun feel.
+**Game is One in the Chamber (OITC) only for now.** You begin in a dedicated **Lobby** with a full-screen **hub** (**Play | Shop | Inventory | Settings**). Press **START** for a punchy **3…2…1…GO!** announcer countdown, then fight in a **themed 3×3 room grid** with doors, half-walls, crawl gaps, and **4 combat bots** that path, shoot, and melee. Quiet match music + win sting. Server-authoritative combat, **Credits** economy, cosmetic shop (Part-based pistol/knife skins), and polished gun feel.
 
 No free Robux, no exploits, no aimbot — just a clean Luau starter.
 
@@ -97,6 +97,46 @@ Lobby includes **weapon display stands** + desk (Parts). Half-walls get metal to
 | Death / respawn | Still in-match; ammo resets to **1**; cosmetics re-applied |
 | Reload | **Disabled** |
 
+## Combat bots
+
+Passive Training Dummies are **replaced** by fighting bots (`NPCService`):
+
+| Behavior | Detail |
+|----------|--------|
+| Count | **4** (`Config.NPC.Count`) |
+| Movement | Pathfind / MoveTo between room centers, cover, and `BotWaypoints` |
+| Target | Players with `CQCInMatch == true` only (lobby-safe) |
+| Gun | Server raycast pistol, **OITC one-shot** (`GunDamage = 100`), 1 ammo |
+| Melee | When within `MeleeRange` (~8) |
+| Ammo refill | On bot kill of player (`RefillAmmoOnKill`), or after `EmptyAmmoRegenSeconds` |
+| Player kill of bot | Same as player kill: **+1 OITC ammo**, score, Credits, kill feed |
+| Respawn | After `RespawnDelay` (default 5s) |
+
+Tune in `Config.NPC`.
+
+## Map art (room themes)
+
+Each of the 9 combat rooms has a distinct theme (floor material/color, wall tint, neon trim, ceiling lamps, floor pattern):
+
+Briefing · Lockers · Server · Armory · Ops · MedBay · Storage · Range · Vault
+
+Lobby gets a nicer desk, accent neon, and weapon display stands. **Gameplay geometry** (doors, half-walls, crawl gaps, spawn pads) is unchanged.
+
+## Round music / announcer
+
+Documented in `Config.SoundIds` / `Config.SoundVolumes` / `Config.Match`:
+
+| Key | Asset ID | Use |
+|-----|----------|-----|
+| `CountdownTick` / `Countdown3`–`1` | `rbxassetid://9113895097` | Punchy 3-2-1 beeps (pitch rises toward GO) |
+| `CountdownGo` / `RoundStart` | `rbxassetid://9113824583` | GO! stinger |
+| `MatchLoop` | `rbxassetid://1848354536` | Quiet looping bed while in match |
+| `WinSting` | `rbxassetid://5852410825` | Victory sting on match end |
+
+Wired in `Hub.client.lua`: countdown beeps → GO sting → match loop on `MatchStarted` → stop loop + win sting on `MatchEnded` / return to hub.
+
+> Replace any ID with your own uploaded audio if a catalog asset is moderated or unavailable.
+
 ## Project layout
 
 ```
@@ -118,7 +158,7 @@ roblox-cqc-shooter/
         WeaponService.lua
         GameModeService.lua
         LobbyService.lua
-        NPCService.lua
+        NPCService.lua       # combat bots (path / shoot / melee)
         DoorService.lua
     Client/
       Hub.client.lua      # full-bleed sidebar hub + countdown/end
@@ -141,7 +181,7 @@ Studio: new Baseplate → Rojo Connect → **Play**.
 1. Spawn in **Lobby** — full-bleed hub menu (opaque UI; 3D world not visible).
 2. **Shop** — buy a skin with starting Credits; **Inventory** — equip it.
 3. **Play → START** → countdown → FP combat with skinned tools.
-4. Kill dummies for score + Credits; win at 5 kills → end overlay.
+4. Fight **bots** (and other players) for score + Credits; win at 5 kills → win sting + end overlay.
 
 ### Controls
 
@@ -155,7 +195,7 @@ Studio: new Baseplate → Rojo Connect → **Play**.
 
 ## Config knobs
 
-See `Config.Economy`, `Config.ShopItems`, `Config.Lighting.Post`, `Config.OITC`, `Config.Match`, `Config.Feel`, `Config.Remotes`.
+See `Config.Economy`, `Config.ShopItems`, `Config.Lighting.Post`, `Config.OITC`, `Config.Match`, `Config.NPC` (bots), `Config.SoundIds` (countdown/music), `Config.Feel`, `Config.Remotes`.
 
 ## Design notes
 
