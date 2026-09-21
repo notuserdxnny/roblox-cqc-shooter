@@ -1140,16 +1140,56 @@ corner(hubAgainBtn, Theme.RadiusSm)
 --------------------------------------------------------------------------
 -- Camera: Scriptable fixed on dark void while hub open
 --------------------------------------------------------------------------
-local function playLocalSound(soundId: string?, volume: number?)
+local matchLoopSound: Sound? = nil
+
+local function playLocalSound(soundId: string?, volume: number?, playbackSpeed: number?)
 	if typeof(soundId) ~= "string" or soundId == "" or soundId == "rbxassetid://0" then
 		return
 	end
 	local s = Instance.new("Sound")
 	s.SoundId = soundId
 	s.Volume = volume or 0.5
+	s.PlaybackSpeed = playbackSpeed or 1
 	s.Parent = playerGui
 	s:Play()
-	Debris:AddItem(s, 4)
+	Debris:AddItem(s, 5)
+end
+
+local function stopMatchLoop()
+	if matchLoopSound then
+		matchLoopSound:Stop()
+		matchLoopSound:Destroy()
+		matchLoopSound = nil
+	end
+end
+
+local function startMatchLoop()
+	stopMatchLoop()
+	local id = (Config.Match and Config.Match.MatchLoopSoundId)
+		or (Config.SoundIds and Config.SoundIds.MatchLoop)
+	if typeof(id) ~= "string" or id == "" then
+		return
+	end
+	local vol = (Config.Match and Config.Match.MatchLoopVolume)
+		or (Config.SoundVolumes and Config.SoundVolumes.MatchLoop)
+		or 0.18
+	local s = Instance.new("Sound")
+	s.Name = "CQCMatchLoop"
+	s.SoundId = id
+	s.Volume = vol
+	s.Looped = true
+	s.Parent = playerGui
+	s:Play()
+	matchLoopSound = s
+end
+
+local function playWinSting()
+	local id = (Config.Match and Config.Match.WinStingSoundId)
+		or (Config.SoundIds and Config.SoundIds.WinSting)
+	local vol = (Config.Match and Config.Match.WinStingVolume)
+		or (Config.SoundVolumes and Config.SoundVolumes.WinSting)
+		or 0.6
+	playLocalSound(id, vol, 1)
 end
 
 local function unlockMouse()
@@ -1219,6 +1259,7 @@ local function hideHub()
 end
 
 local function showHub()
+	stopMatchLoop()
 	started = false
 	startBtn.Text = "START MATCH"
 	startBtn.Active = true
@@ -1300,8 +1341,7 @@ local function runCountdownVisual(payload: any)
 	end
 
 	cdSub.Text = "ONE IN THE CHAMBER  ·  GET READY"
-	local tickId = Config.SoundIds and Config.SoundIds.CountdownTick
-	local tickVol = (Config.SoundVolumes and Config.SoundVolumes.CountdownTick) or 0.35
+	stopMatchLoop()
 
 	task.spawn(function()
 		for i = seconds, 1, -1 do
@@ -1311,7 +1351,15 @@ local function runCountdownVisual(payload: any)
 			cdLabel.Text = tostring(i)
 			cdLabel.TextColor3 = Theme.Text
 			cdLabel.TextSize = 120
-			playLocalSound(tickId, tickVol)
+			-- Punchy 3-2-1: distinct IDs when set, else CountdownTick with rising pitch
+			local key = "Countdown" .. tostring(i)
+			local ids = Config.SoundIds
+			local vols = Config.SoundVolumes
+			local sid = ids and (ids[key] or ids.CountdownTick)
+			local svol = (vols and (vols[key] or vols.CountdownTick)) or 0.4
+			-- Higher pitch as we approach GO (3→1)
+			local speed = 0.85 + (seconds - i) * 0.18
+			playLocalSound(sid, svol, speed)
 			task.wait(1)
 		end
 		if countdownGen ~= gen then
@@ -1321,14 +1369,14 @@ local function runCountdownVisual(payload: any)
 		cdLabel.TextColor3 = Theme.Success
 		cdLabel.TextSize = 110
 		cdSub.Text = "FIGHT"
-		local startId = Config.Match and Config.Match.RoundStartSoundId
-		if typeof(startId) ~= "string" or startId == "" then
-			startId = Config.SoundIds and Config.SoundIds.RoundStart
-		end
-		local startVol = (Config.Match and Config.Match.RoundStartSoundVolume)
+		local startId = (Config.SoundIds and Config.SoundIds.CountdownGo)
+			or (Config.Match and Config.Match.RoundStartSoundId)
+			or (Config.SoundIds and Config.SoundIds.RoundStart)
+		local startVol = (Config.SoundVolumes and Config.SoundVolumes.CountdownGo)
+			or (Config.Match and Config.Match.RoundStartSoundVolume)
 			or (Config.SoundVolumes and Config.SoundVolumes.RoundStart)
-			or 0.55
-		playLocalSound(startId, startVol)
+			or 0.65
+		playLocalSound(startId, startVol, 1.05)
 		task.wait(goHold)
 		if countdownGen ~= gen then
 			return
@@ -1351,6 +1399,7 @@ matchStartedRemote.OnClientEvent:Connect(function(_payload)
 	winnerGui.Enabled = false
 	hideHub()
 	applyHubCamera(false)
+	startMatchLoop()
 end)
 
 matchEndedRemote.OnClientEvent:Connect(function(payload)
@@ -1359,6 +1408,8 @@ matchEndedRemote.OnClientEvent:Connect(function(payload)
 	end
 	countdownGen += 1
 	countdownGui.Enabled = false
+	stopMatchLoop()
+	playWinSting()
 
 	local name = tostring(payload.winnerName or "?")
 	local kills = tonumber(payload.kills) or 0
@@ -1400,6 +1451,7 @@ end)
 returnToHubRemote.OnClientEvent:Connect(function()
 	countdownGen += 1
 	countdownGui.Enabled = false
+	stopMatchLoop()
 	showHub()
 end)
 
