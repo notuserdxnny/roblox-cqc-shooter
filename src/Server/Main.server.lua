@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Server entry: remotes, combat, weapons, doors, NPCs in room complex.
+	Server entry: remotes, combat, weapons, game modes, doors, NPCs in room complex.
 	Weapons are granted after client Hub StartMatch (not on bare join).
 ]]
 
@@ -30,16 +30,21 @@ ensureRemote(Config.Remotes.StatsUpdate)
 ensureRemote(Config.Remotes.ToggleDoor)
 ensureRemote(Config.Remotes.StartMatch)
 ensureRemote(Config.Remotes.MatchStarted)
+ensureRemote(Config.Remotes.MatchEnded)
+ensureRemote(Config.Remotes.ReturnToHub)
+ensureRemote(Config.Remotes.MeleeAttack)
 
 local Modules = script.Parent:WaitForChild("Modules")
 local CombatService = require(Modules:WaitForChild("CombatService"))
 local WeaponService = require(Modules:WaitForChild("WeaponService"))
+local GameModeService = require(Modules:WaitForChild("GameModeService"))
 local NPCService = require(Modules:WaitForChild("NPCService"))
 -- DoorService is Init'd by WorldSetup; ensure module loads
 require(Modules:WaitForChild("DoorService"))
 
 CombatService.Init()
 WeaponService.Init()
+GameModeService.Init()
 
 -- Wait for WorldSetup room marks, then spawn NPCs in marked rooms
 task.defer(function()
@@ -61,4 +66,4 @@ task.defer(function()
 	NPCService.Init(Vector3.new(0, Config.Arena.SpawnHeight, 0))
 end)
 
-print("[CQC] Server Main ready (hub → StartMatch → loadout).")
+print("[CQC] Server Main ready (hub → Casual | OITC → StartMatch).")

@@ -21,10 +21,15 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local fireRemote = remotes:WaitForChild(Config.Remotes.FireWeapon) :: RemoteEvent
 local fireResultRemote = remotes:WaitForChild(Config.Remotes.FireResult) :: RemoteEvent
+local meleeRemote = remotes:WaitForChild(Config.Remotes.MeleeAttack) :: RemoteEvent
 
 local equippedTool: Tool? = nil
 local holding = false
 local lastLocalFire = 0
+local lastLocalMelee = 0
+local clientAmmo = 0
+local clientMode = Config.DefaultMode
+local meleeReady = false
 local boundTools: { [Tool]: boolean } = {}
 local watchedContainers: { [Instance]: boolean } = {}
 
@@ -70,7 +75,32 @@ local markArms = {
 }
 
 local function isOurTool(tool: Instance?): boolean
-	return Config.IsWeaponTool(tool)
+	return Config.IsWeaponTool(tool) or Config.IsMeleeTool(tool)
+end
+
+local function isMeleeTool(tool: Instance?): boolean
+	return Config.IsMeleeTool(tool)
+end
+
+local function inOITC(): boolean
+	local attr = player:GetAttribute("CQCMode")
+	if typeof(attr) == "string" then
+		return attr == Config.Modes.OITC
+	end
+	return clientMode == Config.Modes.OITC
+end
+
+local function shouldMelee(): boolean
+	if not inOITC() then
+		return false
+	end
+	if meleeReady or clientAmmo <= 0 then
+		return true
+	end
+	if equippedTool and isMeleeTool(equippedTool) then
+		return true
+	end
+	return false
 end
 
 local function currentWeaponId(): string?
@@ -378,6 +408,28 @@ local function onFireResult(payload: any)
 	if kind == "empty" then
 		local parent: Instance = (tool and getMuzzlePart(tool)) or (char and char:FindFirstChild("HumanoidRootPart")) or fxGui
 		playSoundAt(parent, soundIds.Empty, volumes.Empty, 1)
+		if payload.meleeReady == true then
+			meleeReady = true
+			clientAmmo = 0
+		end
+		return
+	end
+
+	if kind == "melee" then
+		local parent: Instance = (tool and getMuzzlePart(tool)) or (char and char:FindFirstChild("HumanoidRootPart")) or fxGui
+		playSoundAt(parent, soundIds.Melee or soundIds.HitConfirm, volumes.Melee or volumes.HitConfirm, 1.1)
+		if typeof(payload.ammo) == "number" then
+			clientAmmo = payload.ammo
+			meleeReady = clientAmmo <= 0
+		end
+		if payload.anyHit == true and typeof(payload.hits) == "table" then
+			showHitMarker(false)
+			for _, hit in payload.hits do
+				if typeof(hit) == "table" and typeof(hit.position) == "Vector3" and typeof(hit.damage) == "number" then
+					spawnDamageNumber(hit.position, hit.damage, false)
+				end
+			end
+		end
 		return
 	end
 
@@ -393,6 +445,14 @@ local function onFireResult(payload: any)
 
 	if kind ~= "shot" then
 		return
+	end
+
+	if typeof(payload.ammo) == "number" then
+		clientAmmo = payload.ammo
+		meleeReady = inOITC() and clientAmmo <= 0
+	end
+	if payload.meleeReady == true then
+		meleeReady = true
 	end
 
 	local wid = if typeof(payload.weaponId) == "string" then payload.weaponId else currentWeaponId()
@@ -443,14 +503,41 @@ end
 
 fireResultRemote.OnClientEvent:Connect(onFireResult)
 
-local function tryFire()
-	if not equippedTool then
-		return
-	end
+local function tryMelee()
 	if player:GetAttribute("CQCInHub") == true then
 		return
 	end
 	if player:GetAttribute("CQCInMatch") ~= true then
+		return
+	end
+	local now = os.clock()
+	if now - lastLocalMelee < Config.OITC.MeleeCooldown * 0.85 then
+		return
+	end
+	lastLocalMelee = now
+	local origin, look = getLook()
+	meleeRemote:FireServer(origin, look)
+end
+
+local function tryFire()
+	if player:GetAttribute("CQCInHub") == true then
+		return
+	end
+	if player:GetAttribute("CQCInMatch") ~= true then
+		return
+	end
+
+	-- OITC empty / knife: short-range melee instead of gun fire
+	if shouldMelee() then
+		tryMelee()
+		return
+	end
+
+	if not equippedTool then
+		return
+	end
+	if isMeleeTool(equippedTool) then
+		tryMelee()
 		return
 	end
 	local def = Config.GetWeaponByToolName(equippedTool.Name)
@@ -538,16 +625,53 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
 	end
-	if not equippedTool then
-		return
-	end
 	if input.KeyCode == Enum.KeyCode.R then
+		if inOITC() then
+			return -- no reload in OITC
+		end
+		if not equippedTool then
+			return
+		end
 		fireRemote:FireServer("reload")
 	end
 end)
 
+-- Track ammo/mode from server for melee gating
+local ammoRemote = remotes:WaitForChild(Config.Remotes.AmmoUpdate) :: RemoteEvent
+ammoRemote.OnClientEvent:Connect(function(current, _max, _reloading, _weaponId, _wName)
+	if typeof(current) == "number" then
+		clientAmmo = current
+		meleeReady = inOITC() and clientAmmo <= 0
+	end
+end)
+
+local statsRemote = remotes:WaitForChild(Config.Remotes.StatsUpdate) :: RemoteEvent
+statsRemote.OnClientEvent:Connect(function(stats)
+	if typeof(stats) ~= "table" then
+		return
+	end
+	if typeof(stats.mode) == "string" then
+		clientMode = stats.mode
+	end
+	if typeof(stats.ammo) == "number" then
+		clientAmmo = stats.ammo
+	end
+	if stats.meleeReady ~= nil then
+		meleeReady = stats.meleeReady == true
+	elseif inOITC() then
+		meleeReady = clientAmmo <= 0
+	end
+end)
+
+player:GetAttributeChangedSignal("CQCMode"):Connect(function()
+	local m = player:GetAttribute("CQCMode")
+	if typeof(m) == "string" then
+		clientMode = m
+	end
+end)
+
 RunService.RenderStepped:Connect(function()
-	if holding and equippedTool then
+	if holding and (equippedTool or shouldMelee()) then
 		tryFire()
 	end
 end)

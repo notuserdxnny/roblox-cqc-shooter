@@ -2,6 +2,8 @@
 --[[
 	Server-authoritative combat: validates fire requests, raycasts, applies damage.
 	Per-weapon ammo / cooldown based on the equipped Tool (Shotgun / SMG / Pistol).
+	OITC: no reload, ammo is bullet count, kills award +1 ammo via GameModeService,
+	melee short-range raycast when empty.
 	Returns FireResult to the shooter so client can play hitmarkers / tracers only on real outcomes.
 ]]
 
@@ -16,9 +18,11 @@ export type PlayerCombatState = {
 	ammoByWeapon: { [string]: number },
 	reloadingWeapon: string?,
 	lastFireByWeapon: { [string]: number },
+	lastMelee: number,
 	kills: number,
 	inMatch: boolean,
 	preferredWeapon: string,
+	mode: string,
 }
 
 local combatState: { [Player]: PlayerCombatState } = {}
@@ -29,6 +33,16 @@ local ammoRemote: RemoteEvent? = nil
 local killFeedRemote: RemoteEvent? = nil
 local statsRemote: RemoteEvent? = nil
 local matchStartedRemote: RemoteEvent? = nil
+local meleeRemote: RemoteEvent? = nil
+
+local GameModeService: any = nil
+
+local function getGameMode()
+	if not GameModeService then
+		GameModeService = require(script.Parent:WaitForChild("GameModeService"))
+	end
+	return GameModeService
+end
 
 local function getRemotes()
 	if remotesFolder and fireRemote and fireResultRemote then
@@ -58,6 +72,7 @@ local function getRemotes()
 	killFeedRemote = ensureRemote(Config.Remotes.KillFeed)
 	statsRemote = ensureRemote(Config.Remotes.StatsUpdate)
 	matchStartedRemote = ensureRemote(Config.Remotes.MatchStarted)
+	meleeRemote = ensureRemote(Config.Remotes.MeleeAttack)
 end
 
 local function ensureAmmoTables(state: PlayerCombatState)
@@ -81,14 +96,24 @@ function CombatService.GetOrCreateState(player: Player): PlayerCombatState
 			ammoByWeapon = {},
 			reloadingWeapon = nil,
 			lastFireByWeapon = {},
+			lastMelee = 0,
 			kills = 0,
 			inMatch = false,
 			preferredWeapon = Config.DefaultWeaponId,
+			mode = Config.DefaultMode,
 		}
 		combatState[player] = state
 	end
 	ensureAmmoTables(state)
 	return state
+end
+
+local function isOITC(player: Player): boolean
+	local state = combatState[player]
+	if state and state.mode == Config.Modes.OITC then
+		return true
+	end
+	return getGameMode().IsOITC(player)
 end
 
 local function equippedWeapon(player: Player): (Config.WeaponDef?, Tool?)
@@ -107,6 +132,13 @@ local function equippedWeapon(player: Player): (Config.WeaponDef?, Tool?)
 	return nil, nil
 end
 
+local function magDisplay(player: Player, def: Config.WeaponDef): number
+	if isOITC(player) then
+		return Config.OITC.MagazineDisplay
+	end
+	return def.MagazineSize
+end
+
 local function pushAmmo(player: Player, weaponId: string?)
 	getRemotes()
 	local state = combatState[player]
@@ -122,9 +154,13 @@ local function pushAmmo(player: Player, weaponId: string?)
 	if not def then
 		return
 	end
-	local ammo = state.ammoByWeapon[def.Id] or def.MagazineSize
+	local ammo = state.ammoByWeapon[def.Id] or 0
 	local reloading = state.reloadingWeapon == def.Id
-	ammoRemote:FireClient(player, ammo, def.MagazineSize, reloading, def.Id, def.Name)
+	local displayName = def.Name
+	if isOITC(player) and ammo <= 0 then
+		displayName = Config.OITC.MeleeToolName
+	end
+	ammoRemote:FireClient(player, ammo, magDisplay(player, def), reloading, def.Id, displayName)
 end
 
 local function pushStats(player: Player, weaponId: string?)
@@ -135,16 +171,30 @@ local function pushStats(player: Player, weaponId: string?)
 	end
 	local id = weaponId or state.preferredWeapon
 	local def = Config.GetWeapon(id)
-	local ammo = if def then (state.ammoByWeapon[def.Id] or def.MagazineSize) else 0
-	local mag = if def then def.MagazineSize else 0
+	local ammo = if def then (state.ammoByWeapon[def.Id] or 0) else 0
+	local mag = if def then magDisplay(player, def) else 0
+	local mode = state.mode
+	local gms = getGameMode()
+	local oitcScore = gms.GetOITCScore(player)
+	local meleeReady = mode == Config.Modes.OITC and ammo <= 0
+	local displayKills = if mode == Config.Modes.OITC then oitcScore else state.kills
+	local weaponName = if def then def.Name else ""
+	if meleeReady then
+		weaponName = Config.OITC.MeleeToolName
+	end
 	statsRemote:FireClient(player, {
-		kills = state.kills,
+		kills = displayKills,
+		oitcScore = oitcScore,
+		killsToWin = Config.OITC.KillsToWin,
+		mode = mode,
 		ammo = ammo,
 		magSize = mag,
 		reloading = state.reloadingWeapon == id,
 		weaponId = id,
-		weaponName = if def then def.Name else "",
+		weaponName = weaponName,
 		inMatch = state.inMatch,
+		meleeReady = meleeReady,
+		matchOver = gms.IsMatchOver(player),
 	})
 end
 
@@ -157,10 +207,15 @@ end
 
 function CombatService.ResetAmmo(player: Player, weaponId: string?)
 	local state = CombatService.GetOrCreateState(player)
+	local oitc = isOITC(player)
 	if weaponId then
 		local def = Config.GetWeapon(weaponId)
 		if def then
-			state.ammoByWeapon[weaponId] = def.MagazineSize
+			if oitc and weaponId == Config.OITC.WeaponId then
+				state.ammoByWeapon[weaponId] = Config.OITC.StartingAmmo
+			else
+				state.ammoByWeapon[weaponId] = def.MagazineSize
+			end
 			if state.reloadingWeapon == weaponId then
 				state.reloadingWeapon = nil
 			end
@@ -169,7 +224,13 @@ function CombatService.ResetAmmo(player: Player, weaponId: string?)
 		for _, id in Config.WeaponOrder do
 			local def = Config.Weapons[id]
 			if def then
-				state.ammoByWeapon[id] = def.MagazineSize
+				if oitc and id == Config.OITC.WeaponId then
+					state.ammoByWeapon[id] = Config.OITC.StartingAmmo
+				elseif oitc then
+					state.ammoByWeapon[id] = 0
+				else
+					state.ammoByWeapon[id] = def.MagazineSize
+				end
 			end
 		end
 		state.reloadingWeapon = nil
@@ -178,17 +239,41 @@ function CombatService.ResetAmmo(player: Player, weaponId: string?)
 	pushStats(player, weaponId)
 end
 
-function CombatService.SetInMatch(player: Player, inMatch: boolean, preferredWeapon: string?)
+function CombatService.AwardOITCAmmo(player: Player, amount: number)
+	local state = CombatService.GetOrCreateState(player)
+	local wid = Config.OITC.WeaponId
+	state.ammoByWeapon[wid] = (state.ammoByWeapon[wid] or 0) + amount
+	state.reloadingWeapon = nil
+	pushAmmo(player, wid)
+	pushStats(player, wid)
+	if (state.ammoByWeapon[wid] or 0) > 0 then
+		CombatService.TryEquipPistol(player)
+	end
+end
+
+function CombatService.SetInMatch(player: Player, inMatch: boolean, preferredWeapon: string?, mode: string?)
 	local state = CombatService.GetOrCreateState(player)
 	state.inMatch = inMatch
 	if preferredWeapon and Config.GetWeapon(preferredWeapon) then
 		state.preferredWeapon = preferredWeapon
 	end
+	if mode then
+		state.mode = mode
+	end
 	player:SetAttribute("CQCInMatch", inMatch)
 	if preferredWeapon then
 		player:SetAttribute("CQCPreferredWeapon", preferredWeapon)
 	end
+	if mode then
+		player:SetAttribute("CQCMode", mode)
+	end
 	pushStats(player, state.preferredWeapon)
+end
+
+function CombatService.SetMode(player: Player, mode: string)
+	local state = CombatService.GetOrCreateState(player)
+	state.mode = mode
+	player:SetAttribute("CQCMode", mode)
 end
 
 function CombatService.IsInMatch(player: Player): boolean
@@ -198,6 +283,10 @@ end
 function CombatService.StartReload(player: Player)
 	local state = CombatService.GetOrCreateState(player)
 	if not state.inMatch then
+		return
+	end
+	-- OITC never reloads from reserve — bullets only come from kills / spawn
+	if isOITC(player) then
 		return
 	end
 	local def = equippedWeapon(player)
@@ -228,6 +317,10 @@ function CombatService.StartReload(player: Player)
 		end
 		local s = combatState[player]
 		if not s or s.reloadingWeapon ~= weaponId then
+			return
+		end
+		if s.mode == Config.Modes.OITC then
+			s.reloadingWeapon = nil
 			return
 		end
 		local wdef = Config.GetWeapon(weaponId)
@@ -296,6 +389,73 @@ local function getMuzzleWorld(tool: Tool, def: Config.WeaponDef, fallback: Vecto
 	return fallback
 end
 
+local function creditKill(player: Player, state: PlayerCombatState, hitPlayer: Player?, hitModel: Model, viaMelee: boolean, weaponId: string?)
+	state.kills += 1
+	pushStats(player, weaponId)
+	local victimName = if hitPlayer then hitPlayer.Name else hitModel.Name
+	if killFeedRemote then
+		killFeedRemote:FireAllClients(player.Name, victimName)
+	end
+	getGameMode().OnKill(player, victimName, viaMelee)
+end
+
+
+function CombatService.TryEquipMelee(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	local knifeName = Config.OITC.MeleeToolName
+	local knife: Tool? = nil
+	for _, c in character:GetChildren() do
+		if c:IsA("Tool") and c.Name == knifeName then
+			return -- already holding knife
+		end
+	end
+	if backpack then
+		local k = backpack:FindFirstChild(knifeName)
+		if k and k:IsA("Tool") then
+			knife = k
+		end
+	end
+	if knife then
+		humanoid:EquipTool(knife)
+	end
+end
+
+function CombatService.TryEquipPistol(player: Player)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	local pistolName = Config.Weapons.Pistol.Name
+	for _, c in character:GetChildren() do
+		if c:IsA("Tool") and c.Name == pistolName then
+			return
+		end
+	end
+	local pistol: Tool? = nil
+	if backpack then
+		local k = backpack:FindFirstChild(pistolName)
+		if k and k:IsA("Tool") then
+			pistol = k
+		end
+	end
+	if pistol then
+		humanoid:EquipTool(pistol)
+	end
+end
+
 function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	getRemotes()
 	if typeof(origin) ~= "Vector3" or typeof(lookVector) ~= "Vector3" then
@@ -307,6 +467,9 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 
 	local state = CombatService.GetOrCreateState(player)
 	if not state.inMatch then
+		return
+	end
+	if getGameMode().IsMatchOver(player) then
 		return
 	end
 
@@ -322,6 +485,13 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 
 	local def, tool = equippedWeapon(player)
 	if not def or not tool then
+		-- If OITC empty and knife equipped, route to melee
+		if isOITC(player) then
+			local ammo = state.ammoByWeapon[Config.OITC.WeaponId] or 0
+			if ammo <= 0 then
+				CombatService.HandleMelee(player, origin, lookVector)
+			end
+		end
 		return
 	end
 
@@ -336,7 +506,11 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	end
 	local ammo = state.ammoByWeapon[def.Id] or 0
 	if ammo <= 0 then
-		sendFireResult(player, { kind = "empty", ammo = 0, weaponId = def.Id })
+		sendFireResult(player, { kind = "empty", ammo = 0, weaponId = def.Id, meleeReady = isOITC(player) })
+		if isOITC(player) then
+			-- No auto-reload in OITC — client should melee
+			return
+		end
 		CombatService.StartReload(player)
 		return
 	end
@@ -358,14 +532,12 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	params.FilterDescendantsInstances = { character }
 	params.IgnoreWater = true
 
-	local damagedThisShot: { [Humanoid]: boolean } = {}
 	local hits: { [string]: any } = {}
 	local tracers: { [string]: any } = {}
 	local muzzlePos = getMuzzleWorld(tool, def, fireOrigin)
 
 	for _ = 1, pellets do
 		local dir = if pellets > 1 then applyLookSpread(look, def.SpreadDegrees) else look
-		-- Single-pellet weapons still get a tiny cone if SpreadDegrees > 0
 		if pellets == 1 and def.SpreadDegrees > 0 then
 			dir = applyLookSpread(look, def.SpreadDegrees)
 		end
@@ -383,17 +555,21 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 				if hitPlayer ~= player and (Config.Combat.FriendlyFire or not hitPlayer) then
 					local distance = (result.Position - fireOrigin).Magnitude
 					if distance <= def.MaxRange then
-						local dmg = damageFalloff(def, distance)
 						local isHead = result.Instance.Name == "Head"
-						if isHead then
-							dmg *= Config.Combat.HeadshotMultiplier
+						local dmg: number
+						if isOITC(player) then
+							dmg = Config.OITC.GunDamage
+						else
+							dmg = damageFalloff(def, distance)
+							if isHead then
+								dmg *= Config.Combat.HeadshotMultiplier
+							end
+							dmg = math.max(Config.Combat.MinDamage, math.floor(dmg + 0.5))
 						end
-						dmg = math.max(Config.Combat.MinDamage, math.floor(dmg + 0.5))
 
 						hitHuman = true
 						local healthBefore = hitHumanoid.Health
 						hitHumanoid:TakeDamage(dmg)
-						damagedThisShot[hitHumanoid] = true
 
 						table.insert(hits, {
 							position = result.Position,
@@ -404,12 +580,7 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 						})
 
 						if healthBefore > 0 and hitHumanoid.Health <= 0 then
-							state.kills += 1
-							pushStats(player, def.Id)
-							if killFeedRemote then
-								local victimName = if hitPlayer then hitPlayer.Name else hitModel.Name
-								killFeedRemote:FireAllClients(player.Name, victimName)
-							end
+							creditKill(player, state, hitPlayer, hitModel, false, def.Id)
 						end
 					end
 				end
@@ -442,11 +613,109 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 		anyHit = #hits > 0,
 		anyHeadshot = anyHeadshot,
 		weaponId = def.Id,
+		meleeReady = isOITC(player) and (state.ammoByWeapon[def.Id] or 0) <= 0,
 	})
 
-	if (state.ammoByWeapon[def.Id] or 0) <= 0 then
+	if not isOITC(player) and (state.ammoByWeapon[def.Id] or 0) <= 0 then
 		CombatService.StartReload(player)
+	elseif isOITC(player) and (state.ammoByWeapon[def.Id] or 0) <= 0 then
+		CombatService.TryEquipMelee(player)
 	end
+end
+
+function CombatService.HandleMelee(player: Player, origin: any, lookVector: any)
+	getRemotes()
+	if typeof(origin) ~= "Vector3" or typeof(lookVector) ~= "Vector3" then
+		return
+	end
+	if lookVector.Magnitude < 0.1 then
+		return
+	end
+
+	local state = CombatService.GetOrCreateState(player)
+	if not state.inMatch or not isOITC(player) then
+		return
+	end
+	if getGameMode().IsMatchOver(player) then
+		return
+	end
+
+	local ammo = state.ammoByWeapon[Config.OITC.WeaponId] or 0
+	if ammo > 0 then
+		-- Still have bullets — use gun, not melee
+		return
+	end
+
+	local character = player.Character
+	if not character then
+		return
+	end
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not humanoid or humanoid.Health <= 0 or not root then
+		return
+	end
+
+	local now = os.clock()
+	if now - state.lastMelee < Config.OITC.MeleeCooldown then
+		return
+	end
+	state.lastMelee = now
+
+	local fireOrigin = origin :: Vector3
+	if (fireOrigin - root.Position).Magnitude > Config.Combat.MaxLookDistanceFromCharacter then
+		fireOrigin = root.Position + Vector3.new(0, 1.2, 0)
+	end
+	local look = (lookVector :: Vector3).Unit
+	local range = Config.OITC.MeleeRange
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character }
+	params.IgnoreWater = true
+
+	local result = workspace:Raycast(fireOrigin, look * range, params)
+	local endPos = fireOrigin + look * range
+	local hits: { [string]: any } = {}
+	local hitHuman = false
+
+	if result then
+		endPos = result.Position
+		local hitHumanoid, hitModel = resolveHumanoid(result.Instance)
+		if hitHumanoid and hitModel then
+			local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
+			if hitPlayer ~= player and (Config.Combat.FriendlyFire or not hitPlayer) then
+				local dmg = Config.OITC.MeleeDamage
+				local healthBefore = hitHumanoid.Health
+				hitHumanoid:TakeDamage(dmg)
+				hitHuman = true
+				table.insert(hits, {
+					position = result.Position,
+					damage = dmg,
+					headshot = false,
+					partName = result.Instance.Name,
+					victim = hitModel.Name,
+					melee = true,
+				})
+				if healthBefore > 0 and hitHumanoid.Health <= 0 then
+					creditKill(player, state, hitPlayer, hitModel, true, Config.OITC.WeaponId)
+				end
+			end
+		end
+	end
+
+	sendFireResult(player, {
+		kind = "melee",
+		ammo = state.ammoByWeapon[Config.OITC.WeaponId] or 0,
+		origin = fireOrigin,
+		to = endPos,
+		hits = hits,
+		anyHit = #hits > 0,
+		anyHeadshot = false,
+		weaponId = "Melee",
+		meleeReady = (state.ammoByWeapon[Config.OITC.WeaponId] or 0) <= 0,
+	})
+	pushStats(player, Config.OITC.WeaponId)
 end
 
 function CombatService.PushEquippedAmmo(player: Player)
@@ -454,13 +723,22 @@ function CombatService.PushEquippedAmmo(player: Player)
 	if def then
 		pushAmmo(player, def.Id)
 		pushStats(player, def.Id)
+	elseif isOITC(player) then
+		pushAmmo(player, Config.OITC.WeaponId)
+		pushStats(player, Config.OITC.WeaponId)
 	end
 end
 
-function CombatService.NotifyMatchStarted(player: Player, weaponId: string)
+function CombatService.NotifyMatchStarted(player: Player, weaponId: string, mode: string?)
 	getRemotes()
+	local m = mode or CombatService.GetOrCreateState(player).mode
 	if matchStartedRemote then
-		matchStartedRemote:FireClient(player, { weaponId = weaponId, inMatch = true })
+		matchStartedRemote:FireClient(player, {
+			weaponId = weaponId,
+			mode = m,
+			inMatch = true,
+			killsToWin = Config.OITC.KillsToWin,
+		})
 	end
 	pushAmmo(player, weaponId)
 	pushStats(player, weaponId)
@@ -470,7 +748,15 @@ function CombatService.Init()
 	getRemotes()
 	assert(fireRemote)
 	fireRemote.OnServerEvent:Connect(function(player, origin, lookVector)
-		CombatService.HandleFire(player, origin, lookVector)
+		-- String commands handled in WeaponService; Vector3 fire here
+		if typeof(origin) == "Vector3" then
+			CombatService.HandleFire(player, origin, lookVector)
+		end
+	end)
+
+	assert(meleeRemote)
+	meleeRemote.OnServerEvent:Connect(function(player, origin, lookVector)
+		CombatService.HandleMelee(player, origin, lookVector)
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
@@ -480,10 +766,12 @@ function CombatService.Init()
 	Players.PlayerAdded:Connect(function(player)
 		player:SetAttribute("CQCInMatch", false)
 		player:SetAttribute("CQCPreferredWeapon", Config.DefaultWeaponId)
+		player:SetAttribute("CQCMode", Config.DefaultMode)
 	end)
 	for _, player in Players:GetPlayers() do
 		player:SetAttribute("CQCInMatch", false)
 		player:SetAttribute("CQCPreferredWeapon", Config.DefaultWeaponId)
+		player:SetAttribute("CQCMode", Config.DefaultMode)
 	end
 end
 
