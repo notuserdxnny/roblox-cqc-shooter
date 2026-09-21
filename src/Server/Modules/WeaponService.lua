@@ -1,8 +1,8 @@
 --!strict
 --[[
-	Creates Shotgun / SMG / Pistol tools (and Knife for OITC) and grants loadouts after StartMatch.
-	Casual: all three guns. OITC: Pistol only + Knife; ammo starts at Config.OITC.StartingAmmo.
-	On CharacterAdded while in-match, re-grants the mode-appropriate loadout (OITC resets to 1 bullet).
+	Creates weapon tools (catalog includes Shotgun/SMG for later) and grants OITC loadout after StartMatch.
+	OITC-only for now: Pistol + Knife; ammo starts at Config.OITC.StartingAmmo.
+	On CharacterAdded while in-match, re-grants OITC loadout (resets to 1 bullet).
 ]]
 
 local Players = game:GetService("Players")
@@ -186,23 +186,20 @@ local function bindKnifeActivated(player: Player, knife: Tool)
 end
 
 function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?, mode: string?)
-	local resolvedMode = mode or getGameMode().GetMode(player) or Config.DefaultMode
-	if resolvedMode ~= Config.Modes.OITC and resolvedMode ~= Config.Modes.Casual then
-		resolvedMode = Config.DefaultMode
+	-- OITC-only: always pistol + knife regardless of client payload
+	local resolvedMode = Config.Modes.OITC
+	local preferred = Config.OITC.WeaponId
+	if typeof(preferredWeaponId) == "string" and preferredWeaponId == Config.OITC.WeaponId then
+		preferred = preferredWeaponId
 	end
-
-	local preferred = preferredWeaponId or Config.DefaultWeaponId
-	if resolvedMode == Config.Modes.OITC then
-		preferred = Config.OITC.WeaponId
-	elseif not Config.GetWeapon(preferred) then
-		preferred = Config.DefaultWeaponId
-	end
+	-- mode arg ignored (kept for call-site compatibility)
+	local _ = mode
 
 	CombatService.SetMode(player, resolvedMode)
 	CombatService.SetInMatch(player, true, preferred, resolvedMode)
 	getGameMode().SetMode(player, resolvedMode)
 
-	-- Reset ammo for mode (OITC → StartingAmmo on pistol)
+	-- OITC → StartingAmmo on pistol
 	CombatService.ResetAmmo(player, nil)
 
 	local function grant()
@@ -216,23 +213,13 @@ function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?, m
 
 		local preferredTool: Tool? = nil
 
-		if resolvedMode == Config.Modes.OITC then
-			local pistol = getTemplate(Config.OITC.WeaponId):Clone()
-			pistol.Parent = backpack or character
-			preferredTool = pistol
+		local pistol = getTemplate(Config.OITC.WeaponId):Clone()
+		pistol.Parent = backpack or character
+		preferredTool = pistol
 
-			local knife = getKnifeTemplate():Clone()
-			knife.Parent = backpack or character
-			bindKnifeActivated(player, knife)
-		else
-			for _, id in Config.WeaponOrder do
-				local tool = getTemplate(id):Clone()
-				tool.Parent = backpack or character
-				if id == preferred then
-					preferredTool = tool
-				end
-			end
-		end
+		local knife = getKnifeTemplate():Clone()
+		knife.Parent = backpack or character
+		bindKnifeActivated(player, knife)
 
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if humanoid and preferredTool then
@@ -277,6 +264,7 @@ function WeaponService.Init()
 
 	local fire = ensureRemote(Config.Remotes.FireWeapon)
 	local startMatch = ensureRemote(Config.Remotes.StartMatch)
+	ensureRemote(Config.Remotes.MatchCountdown)
 	ensureRemote(Config.Remotes.MatchStarted)
 	ensureRemote(Config.Remotes.MatchEnded)
 	ensureRemote(Config.Remotes.ReturnToHub)
@@ -290,36 +278,17 @@ function WeaponService.Init()
 		end
 	end)
 
-	startMatch.OnServerEvent:Connect(function(player, payload)
-		local weaponId = Config.DefaultWeaponId
-		local mode = Config.DefaultMode
-		if typeof(payload) == "string" and Config.GetWeapon(payload) then
-			weaponId = payload
-		elseif typeof(payload) == "table" then
-			if typeof(payload.weaponId) == "string" and Config.GetWeapon(payload.weaponId) then
-				weaponId = payload.weaponId
-			end
-			if typeof(payload.mode) == "string" then
-				mode = getGameMode().NormalizeMode(payload.mode)
-			end
-		end
-		getGameMode().StartMatch(player, mode, weaponId)
+	startMatch.OnServerEvent:Connect(function(player, _payload)
+		-- OITC-only: ignore client weapon/mode; GameModeService forces OITC rules
+		getGameMode().StartMatch(player, Config.Modes.OITC, Config.OITC.WeaponId)
 	end)
 
 	local function hookPlayer(player: Player)
 		player.CharacterAdded:Connect(function()
 			if CombatService.IsInMatch(player) and not getGameMode().IsMatchOver(player) then
-				local preferred = player:GetAttribute("CQCPreferredWeapon")
-				if typeof(preferred) ~= "string" then
-					preferred = Config.DefaultWeaponId
-				end
-				local mode = player:GetAttribute("CQCMode")
-				if typeof(mode) ~= "string" then
-					mode = getGameMode().GetMode(player)
-				end
 				task.spawn(function()
 					-- OITC classic: respawn with starting ammo again
-					WeaponService.GiveLoadout(player, preferred :: string, mode :: string)
+					WeaponService.GiveLoadout(player, Config.OITC.WeaponId, Config.Modes.OITC)
 				end)
 			end
 		end)

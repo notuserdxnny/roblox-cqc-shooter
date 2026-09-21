@@ -190,16 +190,20 @@ local function pushStats(player: Player, weaponId: string?)
 	local mode = state.mode
 	local gms = getGameMode()
 	local oitcScore = gms.GetOITCScore(player)
-	local meleeReady = mode == Config.Modes.OITC and ammo <= 0
-	local displayKills = if mode == Config.Modes.OITC then oitcScore else state.kills
+	local meleeReady = ammo <= 0
+	local displayKills = oitcScore
 	local weaponName = if def then def.Name else ""
 	if meleeReady then
 		weaponName = Config.OITC.MeleeToolName
 	end
+	local ktw = Config.OITC.KillsToWin
+	if typeof(gms.GetKillsToWin) == "function" then
+		ktw = gms.GetKillsToWin(player)
+	end
 	statsRemote:FireClient(player, {
 		kills = displayKills,
 		oitcScore = oitcScore,
-		killsToWin = Config.OITC.KillsToWin,
+		killsToWin = ktw,
 		mode = mode,
 		ammo = ammo,
 		magSize = mag,
@@ -238,12 +242,10 @@ function CombatService.ResetAmmo(player: Player, weaponId: string?)
 		for _, id in Config.WeaponOrder do
 			local def = Config.Weapons[id]
 			if def then
-				if oitc and id == Config.OITC.WeaponId then
+				if id == Config.OITC.WeaponId then
 					state.ammoByWeapon[id] = Config.OITC.StartingAmmo
-				elseif oitc then
-					state.ammoByWeapon[id] = 0
 				else
-					state.ammoByWeapon[id] = def.MagazineSize
+					state.ammoByWeapon[id] = 0
 				end
 			end
 		end
@@ -288,6 +290,16 @@ function CombatService.SetMode(player: Player, mode: string)
 	local state = CombatService.GetOrCreateState(player)
 	state.mode = mode
 	player:SetAttribute("CQCMode", mode)
+end
+
+function CombatService.ResetMatchStats(player: Player)
+	local state = CombatService.GetOrCreateState(player)
+	state.kills = 0
+	state.reloadingWeapon = nil
+	state.lastMelee = 0
+	for id in state.lastFireByWeapon do
+		state.lastFireByWeapon[id] = 0
+	end
 end
 
 function CombatService.IsInMatch(player: Player): boolean
@@ -761,12 +773,17 @@ end
 function CombatService.NotifyMatchStarted(player: Player, weaponId: string, mode: string?)
 	getRemotes()
 	local m = mode or CombatService.GetOrCreateState(player).mode
+	local ktw = Config.OITC.KillsToWin
+	local gms = getGameMode()
+	if typeof(gms.GetKillsToWin) == "function" then
+		ktw = gms.GetKillsToWin(player)
+	end
 	if matchStartedRemote then
 		matchStartedRemote:FireClient(player, {
 			weaponId = weaponId,
 			mode = m,
 			inMatch = true,
-			killsToWin = Config.OITC.KillsToWin,
+			killsToWin = ktw,
 		})
 	end
 	pushAmmo(player, weaponId)
