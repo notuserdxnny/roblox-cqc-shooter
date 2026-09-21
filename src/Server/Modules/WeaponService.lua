@@ -1,11 +1,8 @@
 --!strict
 --[[
-	Creates and grants the CQC Tool to players on spawn.
-	Firing input is handled by Client/WeaponController.client.lua.
-	Muzzle part includes a PointLight slot for client flash FX.
-
-	Weld order: set CFrame BEFORE creating WeldConstraint so equipping
-	never yanks HumanoidRootPart (classic teleport-on-equip/fire bug).
+	Creates Shotgun / SMG / Pistol tools and grants them after hub StartMatch.
+	Does not give weapons on join — Hub → StartMatch → GiveLoadout.
+	On CharacterAdded while in-match, re-grants the full loadout.
 ]]
 
 local Players = game:GetService("Players")
@@ -16,18 +13,21 @@ local CombatService = require(script.Parent:WaitForChild("CombatService"))
 
 local WeaponService = {}
 
-local function createWeaponTool(): Tool
+local templates: { [string]: Tool } = {}
+
+local function createWeaponTool(def: Config.WeaponDef): Tool
 	local tool = Instance.new("Tool")
-	tool.Name = Config.Weapon.Name
+	tool.Name = def.Name
 	tool.RequiresHandle = true
 	tool.CanBeDropped = false
 	tool.ManualActivationOnly = false
-	tool.ToolTip = "Hold LMB fire · R reload · close range"
+	tool.ToolTip = def.ToolTip
+	tool:SetAttribute("WeaponId", def.Id)
 
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.4, 0.4, 2.2)
-	handle.Color = Color3.fromRGB(40, 40, 48)
+	handle.Size = def.HandleSize
+	handle.Color = def.HandleColor
 	handle.Material = Enum.Material.Metal
 	handle.CanCollide = false
 	handle.Massless = true
@@ -36,12 +36,13 @@ local function createWeaponTool(): Tool
 	local tip = Instance.new("Part")
 	tip.Name = "Muzzle"
 	tip.Size = Vector3.new(0.25, 0.25, 0.4)
-	tip.Color = Color3.fromRGB(180, 40, 40)
+	tip.Color = def.TipColor
 	tip.Material = Enum.Material.Neon
 	tip.CanCollide = false
 	tip.Massless = true
 	-- Align BEFORE weld — critical to avoid character teleport on equip
-	tip.CFrame = handle.CFrame * CFrame.new(0, 0, -1.2)
+	local muzzleZ = -def.HandleSize.Z * 0.45
+	tip.CFrame = handle.CFrame * CFrame.new(0, 0, muzzleZ)
 	tip.Parent = tool
 
 	local weld = Instance.new("WeldConstraint")
@@ -60,51 +61,89 @@ local function createWeaponTool(): Tool
 	return tool
 end
 
-local template: Tool? = nil
-
-local function getTemplate(): Tool
-	if template and template.Parent then
-		return template
+local function getTemplate(weaponId: string): Tool
+	local existing = templates[weaponId]
+	if existing and existing.Parent then
+		return existing
 	end
-	template = createWeaponTool()
-	template.Parent = ReplicatedStorage
-	return template
+	local def = Config.GetWeapon(weaponId)
+	assert(def, "Unknown weapon " .. weaponId)
+	local folder = ReplicatedStorage:FindFirstChild("WeaponTemplates")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "WeaponTemplates"
+		folder.Parent = ReplicatedStorage
+	end
+	local tool = createWeaponTool(def)
+	tool.Parent = folder
+	templates[weaponId] = tool
+	return tool
 end
 
-function WeaponService.GiveWeapon(player: Player)
-	local function onCharacter(_character: Model)
+local function stripWeapons(player: Player)
+	local function strip(container: Instance?)
+		if not container then
+			return
+		end
+		for _, child in container:GetChildren() do
+			if Config.IsWeaponTool(child) then
+				child:Destroy()
+			end
+		end
+	end
+	strip(player:FindFirstChildOfClass("Backpack"))
+	strip(player.Character)
+end
+
+function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?)
+	local preferred = preferredWeaponId or Config.DefaultWeaponId
+	if not Config.GetWeapon(preferred) then
+		preferred = Config.DefaultWeaponId
+	end
+
+	CombatService.SetInMatch(player, true, preferred)
+	CombatService.ResetAmmo(player, nil)
+
+	local function grant()
 		task.wait(0.15)
 		local backpack = player:FindFirstChildOfClass("Backpack")
 		local character = player.Character
 		if not character then
 			return
 		end
+		stripWeapons(player)
 
-		if backpack then
-			for _, child in backpack:GetChildren() do
-				if child.Name == Config.Weapon.Name then
-					child:Destroy()
-				end
+		local preferredTool: Tool? = nil
+		for _, id in Config.WeaponOrder do
+			local tool = getTemplate(id):Clone()
+			tool.Parent = backpack or character
+			if id == preferred then
+				preferredTool = tool
 			end
 		end
-		local existing = character:FindFirstChild(Config.Weapon.Name)
-		if existing then
-			existing:Destroy()
+
+		-- Equip preferred starter
+		local humanoid = character:FindFirstChildOfClass("Humanoid")
+		if humanoid and preferredTool then
+			task.defer(function()
+				if preferredTool and preferredTool.Parent and humanoid.Parent then
+					humanoid:EquipTool(preferredTool)
+				end
+			end)
 		end
 
-		local tool = getTemplate():Clone()
-		tool.Parent = backpack or character
-		CombatService.ResetAmmo(player)
+		CombatService.NotifyMatchStarted(player, preferred)
 	end
 
 	if player.Character then
-		task.spawn(onCharacter, player.Character)
+		task.spawn(grant)
 	end
-	player.CharacterAdded:Connect(onCharacter)
 end
 
 function WeaponService.Init()
-	getTemplate()
+	for _, id in Config.WeaponOrder do
+		getTemplate(id)
+	end
 
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	if not remotes then
@@ -112,24 +151,57 @@ function WeaponService.Init()
 		remotes.Name = "Remotes"
 		remotes.Parent = ReplicatedStorage
 	end
-	local fire = remotes:FindFirstChild(Config.Remotes.FireWeapon) :: RemoteEvent?
-	if not fire then
-		fire = Instance.new("RemoteEvent")
-		fire.Name = Config.Remotes.FireWeapon
-		fire.Parent = remotes
+
+	local function ensureRemote(name: string): RemoteEvent
+		local existing = remotes:FindFirstChild(name)
+		if existing and existing:IsA("RemoteEvent") then
+			return existing
+		end
+		local r = Instance.new("RemoteEvent")
+		r.Name = name
+		r.Parent = remotes
+		return r
 	end
+
+	local fire = ensureRemote(Config.Remotes.FireWeapon)
+	local startMatch = ensureRemote(Config.Remotes.StartMatch)
+	ensureRemote(Config.Remotes.MatchStarted)
 
 	fire.OnServerEvent:Connect(function(player, a)
 		if a == "reload" then
 			CombatService.StartReload(player)
+		elseif a == "sync" then
+			CombatService.PushEquippedAmmo(player)
 		end
 	end)
 
-	Players.PlayerAdded:Connect(function(player)
-		WeaponService.GiveWeapon(player)
+	startMatch.OnServerEvent:Connect(function(player, payload)
+		local weaponId = Config.DefaultWeaponId
+		if typeof(payload) == "string" and Config.GetWeapon(payload) then
+			weaponId = payload
+		elseif typeof(payload) == "table" and typeof(payload.weaponId) == "string" and Config.GetWeapon(payload.weaponId) then
+			weaponId = payload.weaponId
+		end
+		WeaponService.GiveLoadout(player, weaponId)
 	end)
+
+	local function hookPlayer(player: Player)
+		player.CharacterAdded:Connect(function()
+			if CombatService.IsInMatch(player) then
+				local preferred = player:GetAttribute("CQCPreferredWeapon")
+				if typeof(preferred) ~= "string" then
+					preferred = Config.DefaultWeaponId
+				end
+				task.spawn(function()
+					WeaponService.GiveLoadout(player, preferred :: string)
+				end)
+			end
+		end)
+	end
+
+	Players.PlayerAdded:Connect(hookPlayer)
 	for _, player in Players:GetPlayers() do
-		WeaponService.GiveWeapon(player)
+		hookPlayer(player)
 	end
 end
 

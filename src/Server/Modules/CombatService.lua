@@ -1,6 +1,7 @@
 --!strict
 --[[
 	Server-authoritative combat: validates fire requests, raycasts, applies damage.
+	Per-weapon ammo / cooldown based on the equipped Tool (Shotgun / SMG / Pistol).
 	Returns FireResult to the shooter so client can play hitmarkers / tracers only on real outcomes.
 ]]
 
@@ -11,20 +12,23 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 
 local CombatService = {}
 
-export type PlayerWeaponState = {
-	ammo: number,
-	reloading: boolean,
-	lastFireTime: number,
+export type PlayerCombatState = {
+	ammoByWeapon: { [string]: number },
+	reloadingWeapon: string?,
+	lastFireByWeapon: { [string]: number },
 	kills: number,
+	inMatch: boolean,
+	preferredWeapon: string,
 }
 
-local weaponState: { [Player]: PlayerWeaponState } = {}
+local combatState: { [Player]: PlayerCombatState } = {}
 local remotesFolder: Folder? = nil
 local fireRemote: RemoteEvent? = nil
 local fireResultRemote: RemoteEvent? = nil
 local ammoRemote: RemoteEvent? = nil
 local killFeedRemote: RemoteEvent? = nil
 local statsRemote: RemoteEvent? = nil
+local matchStartedRemote: RemoteEvent? = nil
 
 local function getRemotes()
 	if remotesFolder and fireRemote and fireResultRemote then
@@ -53,27 +57,95 @@ local function getRemotes()
 	ammoRemote = ensureRemote(Config.Remotes.AmmoUpdate)
 	killFeedRemote = ensureRemote(Config.Remotes.KillFeed)
 	statsRemote = ensureRemote(Config.Remotes.StatsUpdate)
+	matchStartedRemote = ensureRemote(Config.Remotes.MatchStarted)
 end
 
-local function pushAmmo(player: Player)
-	getRemotes()
-	local state = weaponState[player]
-	if state and ammoRemote then
-		ammoRemote:FireClient(player, state.ammo, Config.Weapon.MagazineSize, state.reloading)
+local function ensureAmmoTables(state: PlayerCombatState)
+	for _, id in Config.WeaponOrder do
+		local def = Config.Weapons[id]
+		if def then
+			if state.ammoByWeapon[id] == nil then
+				state.ammoByWeapon[id] = def.MagazineSize
+			end
+			if state.lastFireByWeapon[id] == nil then
+				state.lastFireByWeapon[id] = 0
+			end
+		end
 	end
 end
 
-local function pushStats(player: Player)
-	getRemotes()
-	local state = weaponState[player]
-	if state and statsRemote then
-		statsRemote:FireClient(player, {
-			kills = state.kills,
-			ammo = state.ammo,
-			magSize = Config.Weapon.MagazineSize,
-			reloading = state.reloading,
-		})
+function CombatService.GetOrCreateState(player: Player): PlayerCombatState
+	local state = combatState[player]
+	if not state then
+		state = {
+			ammoByWeapon = {},
+			reloadingWeapon = nil,
+			lastFireByWeapon = {},
+			kills = 0,
+			inMatch = false,
+			preferredWeapon = Config.DefaultWeaponId,
+		}
+		combatState[player] = state
 	end
+	ensureAmmoTables(state)
+	return state
+end
+
+local function equippedWeapon(player: Player): (Config.WeaponDef?, Tool?)
+	local character = player.Character
+	if not character then
+		return nil, nil
+	end
+	for _, child in character:GetChildren() do
+		if child:IsA("Tool") then
+			local def = Config.GetWeaponByToolName(child.Name)
+			if def then
+				return def, child
+			end
+		end
+	end
+	return nil, nil
+end
+
+local function pushAmmo(player: Player, weaponId: string?)
+	getRemotes()
+	local state = combatState[player]
+	if not state or not ammoRemote then
+		return
+	end
+	local id = weaponId
+	if not id then
+		local def = equippedWeapon(player)
+		id = if def then def.Id else state.preferredWeapon
+	end
+	local def = Config.GetWeapon(id :: string)
+	if not def then
+		return
+	end
+	local ammo = state.ammoByWeapon[def.Id] or def.MagazineSize
+	local reloading = state.reloadingWeapon == def.Id
+	ammoRemote:FireClient(player, ammo, def.MagazineSize, reloading, def.Id, def.Name)
+end
+
+local function pushStats(player: Player, weaponId: string?)
+	getRemotes()
+	local state = combatState[player]
+	if not state or not statsRemote then
+		return
+	end
+	local id = weaponId or state.preferredWeapon
+	local def = Config.GetWeapon(id)
+	local ammo = if def then (state.ammoByWeapon[def.Id] or def.MagazineSize) else 0
+	local mag = if def then def.MagazineSize else 0
+	statsRemote:FireClient(player, {
+		kills = state.kills,
+		ammo = ammo,
+		magSize = mag,
+		reloading = state.reloadingWeapon == id,
+		weaponId = id,
+		weaponName = if def then def.Name else "",
+		inMatch = state.inMatch,
+	})
 end
 
 local function sendFireResult(player: Player, payload: { [string]: any })
@@ -83,73 +155,107 @@ local function sendFireResult(player: Player, payload: { [string]: any })
 	end
 end
 
-function CombatService.GetOrCreateState(player: Player): PlayerWeaponState
-	local state = weaponState[player]
-	if not state then
-		state = {
-			ammo = Config.Weapon.MagazineSize,
-			reloading = false,
-			lastFireTime = 0,
-			kills = 0,
-		}
-		weaponState[player] = state
+function CombatService.ResetAmmo(player: Player, weaponId: string?)
+	local state = CombatService.GetOrCreateState(player)
+	if weaponId then
+		local def = Config.GetWeapon(weaponId)
+		if def then
+			state.ammoByWeapon[weaponId] = def.MagazineSize
+			if state.reloadingWeapon == weaponId then
+				state.reloadingWeapon = nil
+			end
+		end
+	else
+		for _, id in Config.WeaponOrder do
+			local def = Config.Weapons[id]
+			if def then
+				state.ammoByWeapon[id] = def.MagazineSize
+			end
+		end
+		state.reloadingWeapon = nil
 	end
-	return state
+	pushAmmo(player, weaponId)
+	pushStats(player, weaponId)
 end
 
-function CombatService.ResetAmmo(player: Player)
+function CombatService.SetInMatch(player: Player, inMatch: boolean, preferredWeapon: string?)
 	local state = CombatService.GetOrCreateState(player)
-	state.ammo = Config.Weapon.MagazineSize
-	state.reloading = false
-	pushAmmo(player)
-	pushStats(player)
+	state.inMatch = inMatch
+	if preferredWeapon and Config.GetWeapon(preferredWeapon) then
+		state.preferredWeapon = preferredWeapon
+	end
+	player:SetAttribute("CQCInMatch", inMatch)
+	if preferredWeapon then
+		player:SetAttribute("CQCPreferredWeapon", preferredWeapon)
+	end
+	pushStats(player, state.preferredWeapon)
+end
+
+function CombatService.IsInMatch(player: Player): boolean
+	return CombatService.GetOrCreateState(player).inMatch
 end
 
 function CombatService.StartReload(player: Player)
 	local state = CombatService.GetOrCreateState(player)
-	if state.reloading then
+	if not state.inMatch then
 		return
 	end
-	if state.ammo >= Config.Weapon.MagazineSize then
+	local def = equippedWeapon(player)
+	if not def then
 		return
 	end
-	state.reloading = true
-	pushAmmo(player)
-	pushStats(player)
+	if state.reloadingWeapon ~= nil then
+		return
+	end
+	local ammo = state.ammoByWeapon[def.Id] or 0
+	if ammo >= def.MagazineSize then
+		return
+	end
+	state.reloadingWeapon = def.Id
+	pushAmmo(player, def.Id)
+	pushStats(player, def.Id)
 	sendFireResult(player, {
 		kind = "reload",
-		ammo = state.ammo,
+		ammo = ammo,
+		weaponId = def.Id,
 	})
 
-	task.delay(Config.Weapon.ReloadTime, function()
+	local weaponId = def.Id
+	local reloadTime = def.ReloadTime
+	task.delay(reloadTime, function()
 		if not player.Parent then
 			return
 		end
-		local s = weaponState[player]
-		if not s or not s.reloading then
+		local s = combatState[player]
+		if not s or s.reloadingWeapon ~= weaponId then
 			return
 		end
-		s.ammo = Config.Weapon.MagazineSize
-		s.reloading = false
-		pushAmmo(player)
-		pushStats(player)
+		local wdef = Config.GetWeapon(weaponId)
+		if not wdef then
+			s.reloadingWeapon = nil
+			return
+		end
+		s.ammoByWeapon[weaponId] = wdef.MagazineSize
+		s.reloadingWeapon = nil
+		pushAmmo(player, weaponId)
+		pushStats(player, weaponId)
 		sendFireResult(player, {
 			kind = "reloadDone",
-			ammo = s.ammo,
+			ammo = s.ammoByWeapon[weaponId],
+			weaponId = weaponId,
 		})
 	end)
 end
 
-local function damageFalloff(distance: number): number
-	local w = Config.Weapon
-	if distance <= w.EffectiveRange then
-		return w.DamageClose
+local function damageFalloff(def: Config.WeaponDef, distance: number): number
+	if distance <= def.EffectiveRange then
+		return def.DamageClose
 	end
-	if distance >= w.MaxRange then
-		return w.DamageFar
+	if distance >= def.MaxRange then
+		return def.DamageFar
 	end
-	local t = (distance - w.EffectiveRange) / (w.MaxRange - w.EffectiveRange)
-	return w.DamageClose + (w.DamageFar - w.DamageClose) * t
+	local t = (distance - def.EffectiveRange) / (def.MaxRange - def.EffectiveRange)
+	return def.DamageClose + (def.DamageFar - def.DamageClose) * t
 end
 
 local function resolveHumanoid(part: BasePart): (Humanoid?, Model?)
@@ -178,17 +284,14 @@ local function applyLookSpread(look: Vector3, degrees: number): Vector3
 	return dir
 end
 
-local function getMuzzleWorld(character: Model, fallback: Vector3): Vector3
-	local tool = character:FindFirstChild(Config.Weapon.Name)
-	if tool and tool:IsA("Tool") then
-		local muzzle = tool:FindFirstChild("Muzzle")
-		if muzzle and muzzle:IsA("BasePart") then
-			return muzzle.Position
-		end
-		local handle = tool:FindFirstChild("Handle")
-		if handle and handle:IsA("BasePart") then
-			return (handle.CFrame * CFrame.new(Config.Weapon.MuzzleOffset)).Position
-		end
+local function getMuzzleWorld(tool: Tool, def: Config.WeaponDef, fallback: Vector3): Vector3
+	local muzzle = tool:FindFirstChild("Muzzle")
+	if muzzle and muzzle:IsA("BasePart") then
+		return muzzle.Position
+	end
+	local handle = tool:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		return (handle.CFrame * CFrame.new(def.MuzzleOffset)).Position
 	end
 	return fallback
 end
@@ -202,6 +305,11 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 		return
 	end
 
+	local state = CombatService.GetOrCreateState(player)
+	if not state.inMatch then
+		return
+	end
+
 	local character = player.Character
 	if not character then
 		return
@@ -212,53 +320,57 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 		return
 	end
 
-	local tool = character:FindFirstChild(Config.Weapon.Name)
-	if not tool or not tool:IsA("Tool") then
+	local def, tool = equippedWeapon(player)
+	if not def or not tool then
 		return
 	end
 
-	local state = CombatService.GetOrCreateState(player)
 	local now = os.clock()
-	if state.reloading then
-		sendFireResult(player, { kind = "blocked", reason = "reloading" })
+	if state.reloadingWeapon == def.Id then
+		sendFireResult(player, { kind = "blocked", reason = "reloading", weaponId = def.Id })
 		return
 	end
-	if now - state.lastFireTime < Config.Weapon.FireCooldown then
+	local last = state.lastFireByWeapon[def.Id] or 0
+	if now - last < def.FireCooldown then
 		return
 	end
-	if state.ammo <= 0 then
-		sendFireResult(player, { kind = "empty", ammo = 0 })
+	local ammo = state.ammoByWeapon[def.Id] or 0
+	if ammo <= 0 then
+		sendFireResult(player, { kind = "empty", ammo = 0, weaponId = def.Id })
 		CombatService.StartReload(player)
 		return
 	end
 
-	-- Origin must be near the character (anti-cheat lite)
 	local fireOrigin = origin :: Vector3
 	if (fireOrigin - root.Position).Magnitude > Config.Combat.MaxLookDistanceFromCharacter then
 		fireOrigin = root.Position + Vector3.new(0, 1.5, 0)
 	end
 
-	state.lastFireTime = now
-	state.ammo -= 1
-	pushAmmo(player)
-	pushStats(player)
+	state.lastFireByWeapon[def.Id] = now
+	state.ammoByWeapon[def.Id] = ammo - 1
+	pushAmmo(player, def.Id)
+	pushStats(player, def.Id)
 
 	local look = (lookVector :: Vector3).Unit
-	local pellets = math.max(1, Config.Weapon.PelletCount)
+	local pellets = math.max(1, def.PelletCount)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { character }
 	params.IgnoreWater = true
 
 	local damagedThisShot: { [Humanoid]: boolean } = {}
-	local hits: { { [string]: any } } = {}
-	local tracers: { { [string]: any } } = {}
-	local muzzlePos = getMuzzleWorld(character, fireOrigin)
+	local hits: { [string]: any } = {}
+	local tracers: { [string]: any } = {}
+	local muzzlePos = getMuzzleWorld(tool, def, fireOrigin)
 
 	for _ = 1, pellets do
-		local dir = if pellets > 1 then applyLookSpread(look, Config.Weapon.SpreadDegrees) else look
-		local result = workspace:Raycast(fireOrigin, dir * Config.Weapon.MaxRange, params)
-		local endPos = fireOrigin + dir * Config.Weapon.MaxRange
+		local dir = if pellets > 1 then applyLookSpread(look, def.SpreadDegrees) else look
+		-- Single-pellet weapons still get a tiny cone if SpreadDegrees > 0
+		if pellets == 1 and def.SpreadDegrees > 0 then
+			dir = applyLookSpread(look, def.SpreadDegrees)
+		end
+		local result = workspace:Raycast(fireOrigin, dir * def.MaxRange, params)
+		local endPos = fireOrigin + dir * def.MaxRange
 		local hitSomething = false
 		local hitHuman = false
 
@@ -266,22 +378,22 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 			endPos = result.Position
 			hitSomething = true
 			local hitHumanoid, hitModel = resolveHumanoid(result.Instance)
-			if hitHumanoid and hitModel and not damagedThisShot[hitHumanoid] then
+			if hitHumanoid and hitModel then
 				local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
 				if hitPlayer ~= player and (Config.Combat.FriendlyFire or not hitPlayer) then
 					local distance = (result.Position - fireOrigin).Magnitude
-					if distance <= Config.Weapon.MaxRange then
-						local dmg = damageFalloff(distance)
+					if distance <= def.MaxRange then
+						local dmg = damageFalloff(def, distance)
 						local isHead = result.Instance.Name == "Head"
 						if isHead then
 							dmg *= Config.Combat.HeadshotMultiplier
 						end
 						dmg = math.max(Config.Combat.MinDamage, math.floor(dmg + 0.5))
 
-						damagedThisShot[hitHumanoid] = true
 						hitHuman = true
-						local wasAlive = hitHumanoid.Health > 0
+						local healthBefore = hitHumanoid.Health
 						hitHumanoid:TakeDamage(dmg)
+						damagedThisShot[hitHumanoid] = true
 
 						table.insert(hits, {
 							position = result.Position,
@@ -291,9 +403,9 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 							victim = hitModel.Name,
 						})
 
-						if wasAlive and hitHumanoid.Health <= 0 then
+						if healthBefore > 0 and hitHumanoid.Health <= 0 then
 							state.kills += 1
-							pushStats(player)
+							pushStats(player, def.Id)
 							if killFeedRemote then
 								local victimName = if hitPlayer then hitPlayer.Name else hitModel.Name
 								killFeedRemote:FireAllClients(player.Name, victimName)
@@ -322,18 +434,36 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 
 	sendFireResult(player, {
 		kind = "shot",
-		ammo = state.ammo,
+		ammo = state.ammoByWeapon[def.Id],
 		muzzle = muzzlePos,
 		origin = fireOrigin,
 		hits = hits,
 		tracers = tracers,
 		anyHit = #hits > 0,
 		anyHeadshot = anyHeadshot,
+		weaponId = def.Id,
 	})
 
-	if state.ammo <= 0 then
+	if (state.ammoByWeapon[def.Id] or 0) <= 0 then
 		CombatService.StartReload(player)
 	end
+end
+
+function CombatService.PushEquippedAmmo(player: Player)
+	local def = equippedWeapon(player)
+	if def then
+		pushAmmo(player, def.Id)
+		pushStats(player, def.Id)
+	end
+end
+
+function CombatService.NotifyMatchStarted(player: Player, weaponId: string)
+	getRemotes()
+	if matchStartedRemote then
+		matchStartedRemote:FireClient(player, { weaponId = weaponId, inMatch = true })
+	end
+	pushAmmo(player, weaponId)
+	pushStats(player, weaponId)
 end
 
 function CombatService.Init()
@@ -344,8 +474,17 @@ function CombatService.Init()
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
-		weaponState[player] = nil
+		combatState[player] = nil
 	end)
+
+	Players.PlayerAdded:Connect(function(player)
+		player:SetAttribute("CQCInMatch", false)
+		player:SetAttribute("CQCPreferredWeapon", Config.DefaultWeaponId)
+	end)
+	for _, player in Players:GetPlayers() do
+		player:SetAttribute("CQCInMatch", false)
+		player:SetAttribute("CQCPreferredWeapon", Config.DefaultWeaponId)
+	end
 end
 
 return CombatService
