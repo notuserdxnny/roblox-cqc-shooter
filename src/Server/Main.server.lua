@@ -38,6 +38,7 @@ local Modules = script.Parent:WaitForChild("Modules")
 local CombatService = require(Modules:WaitForChild("CombatService"))
 local WeaponService = require(Modules:WaitForChild("WeaponService"))
 local GameModeService = require(Modules:WaitForChild("GameModeService"))
+local LobbyService = require(Modules:WaitForChild("LobbyService"))
 local NPCService = require(Modules:WaitForChild("NPCService"))
 -- DoorService is Init'd by WorldSetup; ensure module loads
 require(Modules:WaitForChild("DoorService"))
@@ -45,6 +46,7 @@ require(Modules:WaitForChild("DoorService"))
 CombatService.Init()
 WeaponService.Init()
 GameModeService.Init()
+LobbyService.Init()
 
 -- Wait for WorldSetup room marks, then spawn NPCs in marked rooms
 task.defer(function()

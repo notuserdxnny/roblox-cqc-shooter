@@ -567,7 +567,7 @@ for _, pair in map.CrawlGapRooms do
 	placeCrawlGap(pair[1], pair[2])
 end
 
--- Spawn in start room
+-- Combat teleport pads in start room (NOT Roblox SpawnLocations — lobby owns spawn)
 local startCenter = roomCenter(map.StartCol, map.StartRow)
 local spawnOffsets = {
 	Vector3.new(-6, 0, -6),
@@ -588,20 +588,7 @@ for i, offset in spawnOffsets do
 		spawnFolder
 	)
 	pad.CanCollide = true
-
-	local spawn = Instance.new("SpawnLocation")
-	spawn.Name = "Spawn" .. i
-	spawn.Size = Vector3.new(5, 1, 5)
-	spawn.CFrame = CFrame.new(pos.X, floorY + 1.1, pos.Z)
-	spawn.Anchored = true
-	spawn.CanCollide = true
-	spawn.Duration = 0
-	spawn.Neutral = true
-	spawn.Transparency = 0.35
-	spawn.BrickColor = BrickColor.new("Bright green")
-	spawn.Material = Enum.Material.Neon
-	spawn.TopSurface = Enum.SurfaceType.Smooth
-	spawn.Parent = spawnFolder
+	pad:SetAttribute("CombatSpawn", true)
 end
 
 -- Publish room centers for NPC placement (attribute on folder)
@@ -632,8 +619,160 @@ for i, pair in npcRooms do
 	mark.Parent = npcMarks
 end
 
+
+--[[
+	Dedicated Lobby room — separate from the combat grid so hub players
+	cannot free-roam the map or shoot NPCs before StartMatch.
+	Only Roblox SpawnLocation lives here.
+]]
+do
+	local lobbyCfg = Config.Lobby
+	local lobbyFolder = Instance.new("Folder")
+	lobbyFolder.Name = "Lobby"
+	lobbyFolder.Parent = folder
+
+	local lx = lobbyCfg.Offset.X
+	local lz = lobbyCfg.Offset.Z
+	local ly = lobbyCfg.FloorY
+	local rs = lobbyCfg.RoomSize
+	local wh = lobbyCfg.WallHeight
+	local half = rs / 2
+
+	-- Floor platform
+	makePart(
+		"LobbyFloor",
+		Vector3.new(rs, 1.2, rs),
+		CFrame.new(lx, ly - 0.6, lz),
+		lobbyCfg.PlatformColor,
+		Enum.Material.Slate,
+		lobbyFolder
+	)
+	local plate = makePart(
+		"LobbyPlate",
+		Vector3.new(rs - 2, 0.12, rs - 2),
+		CFrame.new(lx, ly + 0.06, lz),
+		Color3.fromRGB(40, 48, 64),
+		Enum.Material.SmoothPlastic,
+		lobbyFolder
+	)
+	plate.CanCollide = false
+	plate.CanQuery = false
+
+	-- Ceiling
+	makePart(
+		"LobbyCeiling",
+		Vector3.new(rs, 1, rs),
+		CFrame.new(lx, ly + wh + 0.5, lz),
+		Color3.fromRGB(22, 26, 34),
+		Enum.Material.Concrete,
+		lobbyFolder
+	)
+
+	-- Enclosed walls (no doors to combat)
+	local wallCol = Color3.fromRGB(28, 34, 48)
+	makePart("LobbyWallN", Vector3.new(rs, wh, 1.5), CFrame.new(lx, ly + wh / 2, lz - half), wallCol, Enum.Material.Concrete, lobbyFolder)
+	makePart("LobbyWallS", Vector3.new(rs, wh, 1.5), CFrame.new(lx, ly + wh / 2, lz + half), wallCol, Enum.Material.Concrete, lobbyFolder)
+	makePart("LobbyWallW", Vector3.new(1.5, wh, rs), CFrame.new(lx - half, ly + wh / 2, lz), wallCol, Enum.Material.Concrete, lobbyFolder)
+	makePart("LobbyWallE", Vector3.new(1.5, wh, rs), CFrame.new(lx + half, ly + wh / 2, lz), wallCol, Enum.Material.Concrete, lobbyFolder)
+
+	-- Accent backdrop wall (menu camera faces this)
+	local backdrop = makePart(
+		"LobbyBackdrop",
+		Vector3.new(rs - 4, wh - 2, 0.6),
+		CFrame.new(lx, ly + (wh - 2) / 2 + 1, lz - half + 1.2),
+		lobbyCfg.BackdropColor,
+		Enum.Material.SmoothPlastic,
+		lobbyFolder
+	)
+	backdrop.CanQuery = false
+	local accent = makePart(
+		"LobbyAccent",
+		Vector3.new(rs - 8, 0.4, 0.65),
+		CFrame.new(lx, ly + wh - 2.5, lz - half + 1.2),
+		lobbyCfg.AccentColor,
+		Enum.Material.Neon,
+		lobbyFolder
+	)
+	accent.CanCollide = false
+	accent.CanQuery = false
+
+	-- Soft fill light
+	local lightAnchor = makePart(
+		"LobbyLight",
+		Vector3.new(1.2, 0.4, 1.2),
+		CFrame.new(lx, ly + wh - 1.5, lz),
+		Color3.fromRGB(180, 210, 255),
+		Enum.Material.Neon,
+		lobbyFolder
+	)
+	lightAnchor.CanCollide = false
+	lightAnchor.CanQuery = false
+	lightAnchor.Transparency = 0.4
+	local pl = Instance.new("PointLight")
+	pl.Brightness = 2.2
+	pl.Range = rs * 0.9
+	pl.Color = Color3.fromRGB(200, 220, 255)
+	pl.Parent = lightAnchor
+
+	-- Title billboard
+	local titlePart = makePart(
+		"LobbyTitle",
+		Vector3.new(0.2, 0.2, 0.2),
+		CFrame.new(lx, ly + 6, lz - half + 2),
+		Color3.new(1, 1, 1),
+		Enum.Material.SmoothPlastic,
+		lobbyFolder
+	)
+	titlePart.Transparency = 1
+	titlePart.CanCollide = false
+	titlePart.CanQuery = false
+	local bill = Instance.new("BillboardGui")
+	bill.Size = UDim2.fromOffset(320, 64)
+	bill.StudsOffset = Vector3.new(0, 0, 0)
+	bill.AlwaysOnTop = false
+	bill.Parent = titlePart
+	local lab = Instance.new("TextLabel")
+	lab.Size = UDim2.fromScale(1, 1)
+	lab.BackgroundTransparency = 1
+	lab.Text = "LOBBY"
+	lab.TextColor3 = Color3.fromRGB(220, 230, 255)
+	lab.TextStrokeTransparency = 0.4
+	lab.Font = Enum.Font.GothamBold
+	lab.TextScaled = true
+	lab.Parent = bill
+
+	-- Pad + the only SpawnLocation in the place
+	local pad = makePart(
+		"LobbyPad",
+		Vector3.new(10, 0.4, 10),
+		CFrame.new(lx, ly + 0.2, lz + 2),
+		Color3.fromRGB(50, 90, 160),
+		Enum.Material.Neon,
+		lobbyFolder
+	)
+	pad.CanCollide = true
+
+	local spawn = Instance.new("SpawnLocation")
+	spawn.Name = "LobbySpawn"
+	spawn.Size = Vector3.new(8, 1, 8)
+	spawn.CFrame = CFrame.new(lx, ly + 1.1, lz + 2)
+	spawn.Anchored = true
+	spawn.CanCollide = true
+	spawn.Duration = 0
+	spawn.Neutral = true
+	spawn.Enabled = true
+	spawn.Transparency = 0.4
+	spawn.BrickColor = BrickColor.new("Bright blue")
+	spawn.Material = Enum.Material.Neon
+	spawn.TopSurface = Enum.SurfaceType.Smooth
+	spawn.Parent = lobbyFolder
+
+	folder:SetAttribute("LobbyX", lx)
+	folder:SetAttribute("LobbyZ", lz)
+end
+
 print(string.format(
-	"[CQCArena] Room complex ready — %dx%d rooms, %d doors, half-walls + crawl gaps.",
+	"[CQCArena] Room complex ready — %dx%d rooms, %d doors, lobby + combat pads.",
 	cols,
 	rows,
 	doorIdCounter
