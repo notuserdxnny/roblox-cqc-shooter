@@ -237,17 +237,45 @@ Config.HUD = {
 }
 
 Config.Camera = {
+	-- Applied only after StartMatch / while CQCInMatch
 	LockFirstPerson = true,
 	MinZoom = 0.5,
 	MaxZoom = 0.5,
 	EnableMouseLock = false,
+	-- While hub / lobby (before Start)
+	HubMinZoom = 8,
+	HubMaxZoom = 20,
+	HubDefaultZoom = 14,
 }
 
 Config.Hub = {
 	Title = "CQC ROOM SHOOTER",
-	Subtitle = "Pick a mode, then Start. Casual = full loadout · OITC = one bullet.",
+	Subtitle = "Select a mode, then press Start to leave the Lobby.",
 	HowTo = "Hold LMB to fire · R reload (Casual) · Hotbar switch · Doors open away from you · Jump half-walls · Slide crawl gaps",
 	HowToOITC = "Pistol only · 1 bullet · Kill = +1 ammo · Empty = Knife melee · First to KillsToWin wins · Respawn resets to 1 bullet",
+	ModeCasualBlurb = "Full loadout. Shotgun, SMG, and Pistol on your hotbar. Reload freely and train on dummies.",
+	ModeOITCBlurb = "One bullet. One pistol. Knife when empty. First to the kill goal wins.",
+}
+
+--[[
+	Dedicated Lobby (separate from the combat room grid).
+	Players spawn here before StartMatch; combat map is unreachable until Start.
+]]
+Config.Lobby = {
+	-- World offset so the lobby sits clear of the 3x3 combat grid
+	Offset = Vector3.new(-180, 0, -40),
+	RoomSize = 28,
+	WallHeight = 12,
+	FloorY = 0,
+	SpawnHeight = 4,
+	FreezeWalkSpeed = 0,
+	FreezeJumpPower = 0,
+	MatchWalkSpeed = 16,
+	MatchJumpPower = 50,
+	MatchJumpHeight = 7.2,
+	BackdropColor = Color3.fromRGB(18, 22, 32),
+	AccentColor = Color3.fromRGB(70, 140, 220),
+	PlatformColor = Color3.fromRGB(32, 38, 52),
 }
 
 --[[
@@ -273,7 +301,7 @@ Config.OITC = {
 	AllowReload = false,
 	ResetAmmoOnSpawn = true,
 	GunDamage = 100, -- one-shot in OITC (classic)
-	MeleeRange = 7,
+	MeleeRange = 8,
 	MeleeDamage = 100,
 	MeleeCooldown = 0.5,
 	MeleeToolName = "Knife",
