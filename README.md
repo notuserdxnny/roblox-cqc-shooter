@@ -1,6 +1,6 @@
 # Roblox CQC Shooter
 
-Short-range **first-person** room shooter for **Roblox Studio** / **Rojo**. Spawn into a **grid of connected square rooms** with openable doors, half-wall cover, and crawl gaps. Grab the **CQC Blaster** and fight at close range. Server-authoritative raycast damage with magazine, reload, kill scoring, training dummies, and polished gun feel (camera-only recoil, muzzle flash, tracers, hitmarkers, sounds).
+Short-range **first-person** room shooter for **Roblox Studio** / **Rojo**. Open a **hub** to pick a starter weapon (**Shotgun**, **SMG**, or **Pistol**), then spawn into a **grid of connected square rooms** with doors that **swing away from you**, half-wall cover, and crawl gaps. Server-authoritative raycast damage with per-weapon magazines, reload, kill scoring, training dummies, and polished gun feel (camera-only recoil, muzzle flash, tracers, hitmarkers, sounds).
 
 No free Robux, no exploits, no aimbot — just a clean Luau starter.
 
@@ -8,13 +8,14 @@ No free Robux, no exploits, no aimbot — just a clean Luau starter.
 
 | Piece | Role |
 |--------|------|
-| `WorldSetup.server.lua` | **3×3 room complex**: varied floors, per-room lights, full walls, doorways, doors, half-walls, crawl gaps, start-room spawns |
-| `DoorService` | Server-authoritative door open/close (ProximityPrompt → tween CFrame + CanCollide) |
-| `CombatService` | Validates fire, raycasts, falloff damage, ammo/reload; returns `FireResult` for client juice |
-| `WeaponService` | Gives the Tool on every spawn (`CharacterAdded`); safe muzzle weld order |
-| `NPCService` | Training dummies in marked rooms; wander stays near home room |
-| Client HUD + WeaponController + FirstPerson | Health, ammo, kills, **centered crosshair**, hold-to-fire, R reload, **LockFirstPerson**, camera-only recoil / FX |
-| `Shared/Config.lua` | All tunables including `Feel`, `SoundIds`, `Map`, `Camera`, NPCs |
+| `Hub.client.lua` | Lobby ScreenGui: title, loadout select, how-to, **Start** → `StartMatch` |
+| `WorldSetup.server.lua` | **3×3 room complex**: floors, lights, walls, doorways, doors, half-walls, crawl gaps, spawns |
+| `DoorService` | Server door tween; **opens away from the triggering player** (±angle from side / facing) |
+| `CombatService` | Validates fire per equipped weapon, raycasts, falloff, ammo/reload; `FireResult` juice |
+| `WeaponService` | Builds Shotgun / SMG / Pistol; grants **all three** after Start (equips selected) |
+| `NPCService` | Training dummies in marked rooms |
+| Client HUD + WeaponController + FirstPerson | HUD (hidden in hub), hold-to-fire, R reload, LockFirstPerson after Start |
+| `Shared/Config.lua` | `Weapons`, `Feel`, `SoundIds`, `Map`, `Camera`, `Hub`, remotes |
 
 ## Project layout
 
@@ -34,6 +35,7 @@ roblox-cqc-shooter/
         NPCService.lua
         DoorService.lua
     Client/
+      Hub.client.lua
       HUD.client.lua
       WeaponController.client.lua
       FirstPerson.client.lua
@@ -44,8 +46,8 @@ Rojo mapping (`default.project.json`):
 - `src/Shared` → `ReplicatedStorage.Shared`
 - `src/Server` → `ServerScriptService.Server`
 - `src/Client` → `StarterPlayer.StarterPlayerScripts.Client`
-- StarterPlayer: `CameraMode = LockFirstPerson`, zoom 0.5 / 0.5, shift-lock off
-- Remotes folder under `ReplicatedStorage.Remotes` (created at runtime if missing)
+- StarterPlayer: `CameraMode = LockFirstPerson`, zoom 0.5 / 0.5 (hub temporarily uses Classic for UI clicks)
+- Remotes under `ReplicatedStorage.Remotes` (created at runtime if missing)
 
 ## Setup with Rojo (recommended)
 
@@ -60,7 +62,7 @@ Rojo mapping (`default.project.json`):
 3. In Roblox Studio: open a **new Baseplate** place → Rojo plugin → **Connect**.
 4. Press **Play** (Play Solo is enough).
 
-You should spawn in the **START** room in first person, receive a **CQC Blaster**, see connected rooms with doors, and find orange training dummies in other rooms.
+You should see the **hub**, pick a starter gun, press **Start**, then play in first person with all three tools on the hotbar and training dummies in other rooms.
 
 ## Manual paste (no Rojo)
 
@@ -76,6 +78,7 @@ You should spawn in the **START** room in first person, receive a **CQC Blaster*
    - `Main.server.lua` → `Server.Main` (Script)
    - `WorldSetup.server.lua` → `Server.WorldSetup` (Script)
 5. Copy LocalScripts:
+   - `Hub.client.lua` → `Client.Hub`
    - `HUD.client.lua` → `Client.HUD`
    - `WeaponController.client.lua` → `Client.WeaponController`
    - `FirstPerson.client.lua` → `Client.FirstPerson`
@@ -83,88 +86,86 @@ You should spawn in the **START** room in first person, receive a **CQC Blaster*
 
 ## How to playtest
 
-1. **Play Solo** in Studio — camera should be **locked first person** with a centered crosshair.
-2. Press **1** (or click) to equip **CQC Blaster**.
-3. **Hold Left Mouse** to fire; **R** to reload.
-4. Walk to a doorway and use the **ProximityPrompt** (Open / Close) on doors.
-5. **Jump** over waist-high half-walls; walk into blue **crawl triggers** to briefly slide under crawl beams.
-6. Shoot a **Training Dummy**:
-   - Camera should **punch** briefly and recover (**no character teleport**).
-   - **Muzzle flash** + short **tracer** beam.
-   - On a real hit: **hitmarker**, **damage number**, hit sound.
-7. Die / Reset → respawn in the start room with a fresh tool and full magazine.
+1. **Play Solo** — hub appears (Classic camera so you can click UI).
+2. Select **Shotgun**, **SMG**, or **Pistol** as starter → **START**.
+3. Camera locks **first person**; all three guns are in the hotbar; selected one is equipped.
+4. **Hold Left Mouse** to fire; **R** to reload; **1–3** to switch weapons.
+5. Walk to a doorway and use the **ProximityPrompt** — door **swings away from your side**.
+6. **Jump** half-walls; walk into blue **crawl triggers** to slide under beams.
+7. Shoot a **Training Dummy** — camera punch, muzzle flash, tracer, hitmarker on real hits.
+8. Die / Reset → respawn still in-match with the full loadout.
 
 ### Controls
 
 | Input | Action |
 |--------|--------|
-| Equip CQC Blaster | Select tool (hotbar) |
-| Hold LMB / tap Activate | Fire (client sends look; server raycasts + returns `FireResult`) |
-| R | Reload magazine |
-| ProximityPrompt on door | Open / close (server tween) |
-| WASD / Jump | Move; jump half-walls; touch crawl gaps to slide |
-| Mouse | Look (first person; shift-lock off by default) |
+| Hub Start | Begin match; receive Shotgun + SMG + Pistol |
+| Hotbar 1–3 | Switch weapons |
+| Hold LMB / Activate | Fire (server raycasts + `FireResult`) |
+| R | Reload current magazine |
+| ProximityPrompt on door | Open away from you / close |
+| WASD / Jump | Move; jump half-walls; crawl-slide |
+| Mouse | Look (first person after Start) |
+
+## Weapons
+
+| Weapon | Role | Notes (defaults) |
+|--------|------|------------------|
+| **Shotgun** | Close blast | 8 pellets, wide spread, slow fire, mag 6 |
+| **SMG** | Spray | Fast cooldown, mag 30, light damage |
+| **Pistol** | Precision | Hard hits, tight spread, mag 12 |
+
+Tune each under `Config.Weapons` in `src/Shared/Config.lua`.
 
 ## Map notes
 
 - **3×3 grid** of square rooms (`Config.Map.RoomSize` default 30 studs) sharing walls with **doorway gaps**.
-- **Doors**: wood parts on hinges; **ProximityPrompt** → `DoorService` tweens CFrame; closed doors `CanCollide` + `CanQuery` (block movement and bullets); open doors do not block.
-- **Half-walls**: ~2.8 studs tall, `CanCollide` true — jump over for CQC peek cover (bullets clear over the top).
-- **Crawl gaps**: side pillars + overhead beam (~3 stud floor opening) + ForceField trigger that briefly lowers `HipHeight` / boosts speed for a slide-through.
+- **Doors**: wood parts on hinges; **ProximityPrompt** → `DoorService` tweens CFrame **away from the player** (chooses +/− open angle from which side you stand; facing breaks ties). Closed doors `CanCollide` + `CanQuery`; open doors do not block. Last open direction is stored for close.
+- **Half-walls**: ~2.8 studs tall — jump over for CQC peek cover.
+- **Crawl gaps**: side pillars + overhead beam + ForceField slide trigger.
 - **Full-height walls / closed doors / ceiling** block raycasts (`CanQuery` true).
-- **Per-room PointLights** and **varied floor colors** so rooms read clearly.
+- **Per-room PointLights** and **varied floor colors**.
 - **Spawn** pads only in the START room (grid 1,1). NPCs marked in other rooms.
 
-## First-person note
+## First-person / hub note
 
-- `FirstPerson.client.lua` forces `CameraMode = LockFirstPerson` and Min/Max zoom `0.5`, and **re-applies on `CharacterAdded`**.
-- `default.project.json` sets the same on `StarterPlayer`.
-- Shift-lock (`DevEnableMouseLock`) defaults **off** (`Config.Camera.EnableMouseLock = false`).
-- HUD crosshair stays at screen center for FPS feel.
+- While **hub** is open (`CQCInHub`), camera is **Classic** so buttons are clickable; HUD is hidden.
+- After **Start**, `FirstPerson.client.lua` forces `LockFirstPerson` and zoom `0.5`, and re-applies on `CharacterAdded`.
+- `default.project.json` sets LockFirstPerson on `StarterPlayer` as the post-hub default.
 
 ## Teleport-on-shoot fix
 
-**Root cause:** `WeldConstraint` was created **before** aligning the muzzle tip / muzzle-flash part CFrames. Welding at the wrong relative offset made physics yank the Tool Handle (and thus the character) when the flash appeared or the tool equipped — felt like a teleport when firing.
+**Root cause:** `WeldConstraint` before aligning muzzle / flash CFrames yanked the Tool Handle (felt like a teleport).
 
-**Fix:**
-
-1. Set part `CFrame` **before** creating `WeldConstraint` (WeaponService muzzle tip + client muzzle flash).
-2. Recoil is **camera-only**: accumulated pitch/yaw applied in `BindToRenderStep` at `Camera+1`. Never writes `HumanoidRootPart` / character CFrame.
+**Fix:** set part `CFrame` **before** `WeldConstraint`; recoil is **camera-only** via `BindToRenderStep` at `Camera+1`.
 
 ## Gun feel notes
 
-- **Server authority stays intact**: client never applies damage. Juice only after `FireResult`.
-- **Hitmarkers** only when the server confirms a damaging hit (`anyHit`).
-- **Headshots** distinct marker + `SoundIds.Headshot` when hit part is `Head`.
-- **Tracers** short Beams from muzzle → ray end.
+- Server authority: client never applies damage. Juice only after `FireResult`.
+- Hitmarkers only on confirming damaging hits; headshots distinct.
+- Recoil scale per weapon via `Feel.RecoilByWeapon`.
 - Swap failed `SoundId`s in `Config.SoundIds` if needed.
 
 ## Config knobs (`src/Shared/Config.lua`)
 
-### Weapon / combat
+### Weapons / combat
 
-| Knob | Default | Meaning |
-|------|---------|---------|
-| `Weapon.DamageClose` | 28 | Damage inside effective range |
-| `Weapon.DamageFar` | 6 | Damage near max range |
-| `Weapon.MaxRange` | 55 | Ray max (studs) |
-| `Weapon.EffectiveRange` | 25 | Full close damage within this |
-| `Weapon.FireCooldown` | 0.18 | Seconds between shots |
-| `Weapon.MagazineSize` | 12 | Rounds per mag |
-| `Weapon.ReloadTime` | 1.6 | Reload duration (seconds) |
-| `Combat.HeadshotMultiplier` | 1.35 | Extra damage on Head hits |
-| `Combat.FriendlyFire` | true | Players can hurt each other |
+| Knob | Meaning |
+|------|---------|
+| `Weapons.Shotgun` / `SMG` / `Pistol` | Per-gun damage, range, cooldown, mag, pellets, spread |
+| `WeaponOrder` | Hotbar / hub order |
+| `DefaultWeaponId` | Hub default selection (`SMG`) |
+| `Combat.HeadshotMultiplier` | Extra damage on Head |
+| `Combat.FriendlyFire` | Players can hurt each other |
 
-### Feel / camera
+### Feel / camera / hub
 
-| Knob | Default | Meaning |
-|------|---------|---------|
-| `Feel.RecoilPitchDegrees` | 1.35 | Camera punch up (camera only) |
-| `Feel.RecoilYawDegrees` | 0.35 | Random yaw punch |
-| `Feel.RecoilRecoverSeconds` | 0.12 | Punch recovery time |
-| `Camera.LockFirstPerson` | true | FPS lock |
-| `Camera.MinZoom` / `MaxZoom` | 0.5 | Zoom clamp |
-| `Camera.EnableMouseLock` | false | Shift-lock off |
+| Knob | Meaning |
+|------|---------|
+| `Feel.RecoilPitchDegrees` / `Yaw` | Base camera punch |
+| `Feel.RecoilByWeapon` | Multipliers per gun |
+| `Camera.LockFirstPerson` | FPS lock after Start |
+| `Hub.Title` / `Subtitle` / `HowTo` | Lobby copy |
 
 ### Map / doors / NPCs
 
@@ -174,26 +175,29 @@ You should spawn in the **START** room in first person, receive a **CQC Blaster*
 | `Map.RoomSize` | 30 | Interior square size |
 | `Map.DoorWidth` / `DoorHeight` | 6 / 9 | Doorway / door size |
 | `Map.DoorTweenSeconds` | 0.35 | Open/close tween |
-| `Map.HalfWallRooms` | list | Rooms with jump-over cover |
-| `Map.CrawlGapRooms` | list | Rooms with crawl openings |
+| `Map.DoorOpenAngleDegrees` | 95 | Swing magnitude (± chosen at open) |
+| `Map.HalfWallRooms` | list | Jump-over cover rooms |
+| `Map.CrawlGapRooms` | list | Crawl opening rooms |
 | `NPC.Count` | 3 | Training dummies |
-| `NPC.WanderRadius` | 10 | Stay near home room |
 
 ### Remotes
 
 | Name | Direction | Purpose |
 |------|-----------|---------|
+| `StartMatch` | C→S | `{ weaponId }` begin match + loadout |
+| `MatchStarted` | S→C | Hide hub / confirm |
 | `FireWeapon` | C→S | Origin + look, or `"reload"` |
-| `FireResult` | S→C | Shot / empty / reload payload for FX |
+| `FireResult` | S→C | Shot / empty / reload FX payload |
 | `AmmoUpdate` / `StatsUpdate` / `KillFeed` | S→C | HUD |
-| `ToggleDoor` | reserved | Door prompts are server-side ProximityPrompt |
+| `ToggleDoor` | reserved | Doors use server ProximityPrompt |
 
 ## Design notes
 
-- **Server authority**: client sends origin + look (or `"reload"`). Server checks tool, cooldown, ammo, clamps origin, raycasts, applies damage, returns `FireResult`.
-- **Cover blocks raycasts** where full-height (`CanCollide` + `CanQuery`). Half-walls are short on purpose.
-- **WorldSetup** deletes default `Baseplate` / `SpawnLocation` and places start-room spawns.
-- **Default Roblox character** + Tool — no custom character required.
+- **Hub gate**: no tools until `StartMatch`; combat ignores fire while not in-match.
+- **Server authority**: origin + look validated; equipped Tool selects weapon stats.
+- **Directional doors**: hinge + leaf offset registered; open CFrame = hinge × Y±angle × leaf; pick sign so open leaf is opposite the player.
+- **Cover** blocks raycasts where full-height; half-walls are short on purpose.
+- **WorldSetup** deletes default `Baseplate` / `SpawnLocation`.
 
 ## Caveats
 
@@ -201,7 +205,7 @@ You should spawn in the **START** room in first person, receive a **CQC Blaster*
 - Sound asset IDs may 404 for some accounts; replace in `Config.SoundIds`.
 - `WorldSetup` destroys Workspace `Baseplate` and `SpawnLocation` once at boot.
 - NPCs are dumb wanderers (no pathfinding / shooting back).
-- Crawl “slide” is a short HipHeight hack (Roblox has no built-in crouch).
+- Crawl “slide” is a short HipHeight hack.
 - FilteringEnabled / modern Roblox networking assumed.
 
 ## License
