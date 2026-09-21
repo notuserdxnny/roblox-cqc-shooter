@@ -2,6 +2,7 @@
 --[[
 	Creates and grants the CQC Tool to players on spawn.
 	Firing input is handled by Client/WeaponController.client.lua.
+	Muzzle part includes a PointLight slot for client flash FX.
 ]]
 
 local Players = game:GetService("Players")
@@ -43,6 +44,15 @@ local function createWeaponTool(): Tool
 	weld.Part1 = tip
 	weld.Parent = tip
 	tip.CFrame = handle.CFrame * CFrame.new(0, 0, -1.2)
+
+	-- Pre-create light (client enables briefly on fire)
+	local light = Instance.new("PointLight")
+	light.Name = "MuzzleLight"
+	light.Brightness = 0
+	light.Range = Config.Feel.MuzzleLightRange
+	light.Color = Color3.fromRGB(255, 200, 120)
+	light.Enabled = false
+	light.Parent = tip
 
 	return tool
 end

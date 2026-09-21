@@ -2,6 +2,7 @@
 --[[
 	Spawns simple wandering training dummies for solo playtesting.
 	Compact welded body (root + torso + head) so they stay upright.
+	Placed at Config.NPC.SpawnOffsets (sensible cover-adjacent spots).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -12,6 +13,7 @@ local NPCService = {}
 
 local npcFolder: Folder? = nil
 local arenaCenter = Vector3.new(0, Config.Arena.SpawnHeight, 0)
+local spawnIndex = 0
 
 local function ensureFolder(): Folder
 	if npcFolder and npcFolder.Parent then
@@ -109,6 +111,20 @@ local function createDummy(name: string, position: Vector3): Model
 	return model
 end
 
+local function nextSpawnPosition(): Vector3
+	local offsets = Config.NPC.SpawnOffsets
+	if offsets and #offsets > 0 then
+		spawnIndex = (spawnIndex % #offsets) + 1
+		local off = offsets[spawnIndex]
+		-- Slight jitter so respawns don't stack perfectly
+		local jitter = Vector3.new((math.random() - 0.5) * 4, 0, (math.random() - 0.5) * 4)
+		return arenaCenter + Vector3.new(off.X, 0, off.Z) + jitter
+	end
+	local angle = math.random() * math.pi * 2
+	local dist = 10 + math.random() * 12
+	return arenaCenter + Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+end
+
 local function wanderLoop(model: Model)
 	local humanoid = model:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -138,9 +154,7 @@ end
 
 function NPCService.SpawnOne(name: string?): Model
 	local n = name or (Config.NPC.Name .. " " .. tostring(math.random(10, 99)))
-	local angle = math.random() * math.pi * 2
-	local dist = 10 + math.random() * 12
-	local pos = arenaCenter + Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
+	local pos = nextSpawnPosition()
 	local dummy = createDummy(n, pos)
 	wanderLoop(dummy)
 	return dummy
@@ -150,6 +164,7 @@ function NPCService.Init(center: Vector3?)
 	if center then
 		arenaCenter = center
 	end
+	spawnIndex = 0
 	ensureFolder()
 	for i = 1, Config.NPC.Count do
 		NPCService.SpawnOne(Config.NPC.Name .. " " .. tostring(i))

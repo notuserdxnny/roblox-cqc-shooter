@@ -1,6 +1,7 @@
 --!strict
 --[[
 	Server-authoritative combat: validates fire requests, raycasts, applies damage.
+	Returns FireResult to the shooter so client can play hitmarkers / tracers only on real outcomes.
 ]]
 
 local Players = game:GetService("Players")
@@ -20,12 +21,13 @@ export type PlayerWeaponState = {
 local weaponState: { [Player]: PlayerWeaponState } = {}
 local remotesFolder: Folder? = nil
 local fireRemote: RemoteEvent? = nil
+local fireResultRemote: RemoteEvent? = nil
 local ammoRemote: RemoteEvent? = nil
 local killFeedRemote: RemoteEvent? = nil
 local statsRemote: RemoteEvent? = nil
 
 local function getRemotes()
-	if remotesFolder then
+	if remotesFolder and fireRemote and fireResultRemote then
 		return
 	end
 	remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") :: Folder
@@ -47,6 +49,7 @@ local function getRemotes()
 	end
 
 	fireRemote = ensureRemote(Config.Remotes.FireWeapon)
+	fireResultRemote = ensureRemote(Config.Remotes.FireResult)
 	ammoRemote = ensureRemote(Config.Remotes.AmmoUpdate)
 	killFeedRemote = ensureRemote(Config.Remotes.KillFeed)
 	statsRemote = ensureRemote(Config.Remotes.StatsUpdate)
@@ -70,6 +73,13 @@ local function pushStats(player: Player)
 			magSize = Config.Weapon.MagazineSize,
 			reloading = state.reloading,
 		})
+	end
+end
+
+local function sendFireResult(player: Player, payload: { [string]: any })
+	getRemotes()
+	if fireResultRemote then
+		fireResultRemote:FireClient(player, payload)
 	end
 end
 
@@ -106,6 +116,10 @@ function CombatService.StartReload(player: Player)
 	state.reloading = true
 	pushAmmo(player)
 	pushStats(player)
+	sendFireResult(player, {
+		kind = "reload",
+		ammo = state.ammo,
+	})
 
 	task.delay(Config.Weapon.ReloadTime, function()
 		if not player.Parent then
@@ -119,6 +133,10 @@ function CombatService.StartReload(player: Player)
 		s.reloading = false
 		pushAmmo(player)
 		pushStats(player)
+		sendFireResult(player, {
+			kind = "reloadDone",
+			ammo = s.ammo,
+		})
 	end)
 end
 
@@ -160,6 +178,21 @@ local function applyLookSpread(look: Vector3, degrees: number): Vector3
 	return dir
 end
 
+local function getMuzzleWorld(character: Model, fallback: Vector3): Vector3
+	local tool = character:FindFirstChild(Config.Weapon.Name)
+	if tool and tool:IsA("Tool") then
+		local muzzle = tool:FindFirstChild("Muzzle")
+		if muzzle and muzzle:IsA("BasePart") then
+			return muzzle.Position
+		end
+		local handle = tool:FindFirstChild("Handle")
+		if handle and handle:IsA("BasePart") then
+			return (handle.CFrame * CFrame.new(Config.Weapon.MuzzleOffset)).Position
+		end
+	end
+	return fallback
+end
+
 function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	getRemotes()
 	if typeof(origin) ~= "Vector3" or typeof(lookVector) ~= "Vector3" then
@@ -179,7 +212,6 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 		return
 	end
 
-	-- Must be holding the tool
 	local tool = character:FindFirstChild(Config.Weapon.Name)
 	if not tool or not tool:IsA("Tool") then
 		return
@@ -188,19 +220,22 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	local state = CombatService.GetOrCreateState(player)
 	local now = os.clock()
 	if state.reloading then
+		sendFireResult(player, { kind = "blocked", reason = "reloading" })
 		return
 	end
 	if now - state.lastFireTime < Config.Weapon.FireCooldown then
 		return
 	end
 	if state.ammo <= 0 then
+		sendFireResult(player, { kind = "empty", ammo = 0 })
 		CombatService.StartReload(player)
 		return
 	end
 
 	-- Origin must be near the character (anti-cheat lite)
-	if (origin :: Vector3 - root.Position).Magnitude > Config.Combat.MaxLookDistanceFromCharacter then
-		origin = root.Position + Vector3.new(0, 1.5, 0)
+	local fireOrigin = origin :: Vector3
+	if (fireOrigin - root.Position).Magnitude > Config.Combat.MaxLookDistanceFromCharacter then
+		fireOrigin = root.Position + Vector3.new(0, 1.5, 0)
 	end
 
 	state.lastFireTime = now
@@ -216,53 +251,85 @@ function CombatService.HandleFire(player: Player, origin: any, lookVector: any)
 	params.IgnoreWater = true
 
 	local damagedThisShot: { [Humanoid]: boolean } = {}
+	local hits: { { [string]: any } } = {}
+	local tracers: { { [string]: any } } = {}
+	local muzzlePos = getMuzzleWorld(character, fireOrigin)
 
 	for _ = 1, pellets do
 		local dir = if pellets > 1 then applyLookSpread(look, Config.Weapon.SpreadDegrees) else look
-		local result = workspace:Raycast(origin :: Vector3, dir * Config.Weapon.MaxRange, params)
-		if not result then
-			continue
-		end
+		local result = workspace:Raycast(fireOrigin, dir * Config.Weapon.MaxRange, params)
+		local endPos = fireOrigin + dir * Config.Weapon.MaxRange
+		local hitSomething = false
+		local hitHuman = false
 
-		local hitHumanoid, hitModel = resolveHumanoid(result.Instance)
-		if not hitHumanoid or not hitModel or damagedThisShot[hitHumanoid] then
-			continue
-		end
+		if result then
+			endPos = result.Position
+			hitSomething = true
+			local hitHumanoid, hitModel = resolveHumanoid(result.Instance)
+			if hitHumanoid and hitModel and not damagedThisShot[hitHumanoid] then
+				local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
+				if hitPlayer ~= player and (Config.Combat.FriendlyFire or not hitPlayer) then
+					local distance = (result.Position - fireOrigin).Magnitude
+					if distance <= Config.Weapon.MaxRange then
+						local dmg = damageFalloff(distance)
+						local isHead = result.Instance.Name == "Head"
+						if isHead then
+							dmg *= Config.Combat.HeadshotMultiplier
+						end
+						dmg = math.max(Config.Combat.MinDamage, math.floor(dmg + 0.5))
 
-		-- Optional: skip same team / self
-		local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
-		if hitPlayer == player then
-			continue
-		end
-		if not Config.Combat.FriendlyFire and hitPlayer then
-			continue
-		end
+						damagedThisShot[hitHumanoid] = true
+						hitHuman = true
+						local wasAlive = hitHumanoid.Health > 0
+						hitHumanoid:TakeDamage(dmg)
 
-		local distance = (result.Position - (origin :: Vector3)).Magnitude
-		if distance > Config.Weapon.MaxRange then
-			continue
-		end
+						table.insert(hits, {
+							position = result.Position,
+							damage = dmg,
+							headshot = isHead,
+							partName = result.Instance.Name,
+							victim = hitModel.Name,
+						})
 
-		local dmg = damageFalloff(distance)
-		local isHead = result.Instance.Name == "Head"
-		if isHead then
-			dmg *= Config.Combat.HeadshotMultiplier
-		end
-		dmg = math.max(Config.Combat.MinDamage, math.floor(dmg + 0.5))
-
-		damagedThisShot[hitHumanoid] = true
-		local wasAlive = hitHumanoid.Health > 0
-		hitHumanoid:TakeDamage(dmg)
-
-		if wasAlive and hitHumanoid.Health <= 0 then
-			state.kills += 1
-			pushStats(player)
-			if killFeedRemote then
-				local victimName = if hitPlayer then hitPlayer.Name else hitModel.Name
-				killFeedRemote:FireAllClients(player.Name, victimName)
+						if wasAlive and hitHumanoid.Health <= 0 then
+							state.kills += 1
+							pushStats(player)
+							if killFeedRemote then
+								local victimName = if hitPlayer then hitPlayer.Name else hitModel.Name
+								killFeedRemote:FireAllClients(player.Name, victimName)
+							end
+						end
+					end
+				end
 			end
 		end
+
+		table.insert(tracers, {
+			from = muzzlePos,
+			to = endPos,
+			hit = hitSomething,
+			damaged = hitHuman,
+		})
 	end
+
+	local anyHeadshot = false
+	for _, h in hits do
+		if h.headshot then
+			anyHeadshot = true
+			break
+		end
+	end
+
+	sendFireResult(player, {
+		kind = "shot",
+		ammo = state.ammo,
+		muzzle = muzzlePos,
+		origin = fireOrigin,
+		hits = hits,
+		tracers = tracers,
+		anyHit = #hits > 0,
+		anyHeadshot = anyHeadshot,
+	})
 
 	if state.ammo <= 0 then
 		CombatService.StartReload(player)
