@@ -23,6 +23,7 @@ local function ensureRemote(name: string)
 end
 
 ensureRemote(Config.Remotes.FireWeapon)
+ensureRemote(Config.Remotes.FireResult)
 ensureRemote(Config.Remotes.AmmoUpdate)
 ensureRemote(Config.Remotes.KillFeed)
 ensureRemote(Config.Remotes.StatsUpdate)
@@ -35,7 +36,7 @@ local NPCService = require(Modules:WaitForChild("NPCService"))
 CombatService.Init()
 WeaponService.Init()
 
--- Wait a beat so WorldSetup can finish; NPCs spawn near arena center
+-- Wait a beat so WorldSetup can finish; NPCs spawn near arena center / cover lanes
 task.defer(function()
 	task.wait(0.5)
 	NPCService.Init(Vector3.new(0, Config.Arena.SpawnHeight, 0))
