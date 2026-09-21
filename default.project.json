@@ -19,6 +19,12 @@
     },
     "StarterPlayer": {
       "$className": "StarterPlayer",
+      "$properties": {
+        "CameraMode": "LockFirstPerson",
+        "CameraMinZoomDistance": 0.5,
+        "CameraMaxZoomDistance": 0.5,
+        "DevEnableMouseLock": false
+      },
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
         "Client": {
@@ -35,10 +41,10 @@
     "Lighting": {
       "$className": "Lighting",
       "$properties": {
-        "Ambient": [0.35, 0.37, 0.43],
-        "Brightness": 2.2,
-        "OutdoorAmbient": [0.47, 0.49, 0.55],
-        "ClockTime": 14.5,
+        "Ambient": [0.22, 0.23, 0.27],
+        "Brightness": 1.4,
+        "OutdoorAmbient": [0.16, 0.16, 0.20],
+        "ClockTime": 22,
         "GeographicLatitude": 25,
         "GlobalShadows": true
       }
