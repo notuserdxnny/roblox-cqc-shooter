@@ -1,6 +1,7 @@
 --!strict
 --[[
 	Server entry: remotes, combat, weapons, doors, NPCs in room complex.
+	Weapons are granted after client Hub StartMatch (not on bare join).
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,6 +28,8 @@ ensureRemote(Config.Remotes.AmmoUpdate)
 ensureRemote(Config.Remotes.KillFeed)
 ensureRemote(Config.Remotes.StatsUpdate)
 ensureRemote(Config.Remotes.ToggleDoor)
+ensureRemote(Config.Remotes.StartMatch)
+ensureRemote(Config.Remotes.MatchStarted)
 
 local Modules = script.Parent:WaitForChild("Modules")
 local CombatService = require(Modules:WaitForChild("CombatService"))
@@ -54,9 +57,8 @@ task.defer(function()
 	if #offsets == 0 then
 		offsets = Config.NPC.SpawnOffsets
 	end
-	-- Patch config offsets for this session (NPCService reads Config)
 	Config.NPC.SpawnOffsets = offsets
 	NPCService.Init(Vector3.new(0, Config.Arena.SpawnHeight, 0))
 end)
 
-print("[CQC] Server Main ready.")
+print("[CQC] Server Main ready (hub → StartMatch → loadout).")

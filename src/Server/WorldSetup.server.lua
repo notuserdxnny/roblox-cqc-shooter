@@ -205,27 +205,17 @@ local function createDoor(
 	id: string,
 	hingeWorld: CFrame,
 	closedCFrame: CFrame,
-	openCFrame: CFrame,
 	size: Vector3
 )
 	local door = makePart("Door_" .. id, size, closedCFrame, doorColor, Enum.Material.Wood, doorsFolder)
 	door.CanCollide = true
 	door.CanQuery = true
 
-	-- Hinge marker (visual)
+	-- Hinge marker at hinge world position (relative to door part)
 	local hinge = Instance.new("Attachment")
 	hinge.Name = "Hinge"
 	hinge.Parent = door
-
-	local promptParent = Instance.new("Part")
-	promptParent.Name = "DoorPrompt_" .. id
-	promptParent.Size = Vector3.new(1, 1, 1)
-	promptParent.Transparency = 1
-	promptParent.Anchored = true
-	promptParent.CanCollide = false
-	promptParent.CanQuery = false
-	promptParent.CFrame = closedCFrame
-	promptParent.Parent = doorsFolder
+	hinge.WorldCFrame = hingeWorld
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "Toggle"
@@ -234,12 +224,17 @@ local function createDoor(
 	prompt.MaxActivationDistance = 8
 	prompt.HoldDuration = 0
 	prompt.RequiresLineOfSight = false
-	prompt.Parent = promptParent
-
-	-- Keep prompt near door as it swings (attachment to door is better)
 	prompt.Parent = door
 
-	DoorService.RegisterDoor(id, door, closedCFrame, openCFrame, prompt)
+	-- Directional open: DoorService picks ±angle from triggering player side
+	DoorService.RegisterDoor(
+		id,
+		door,
+		hingeWorld,
+		closedCFrame,
+		math.rad(map.DoorOpenAngleDegrees),
+		prompt
+	)
 end
 
 --[[
@@ -377,17 +372,15 @@ for col = 1, cols do
 			local key = roomKey(col, row)
 			if hasEastNeighbor then
 				wallSegmentsWithDoor(roomFolder, "WallE", edge, Vector3.zAxis, Vector3.xAxis, roomSize, true)
-				-- Door in opening — hinge on +Z side of doorway, swings +yaw open into this room
+				-- Door in opening — hinge on +Z side; open ±yaw chosen by player side
 				doorIdCounter += 1
 				local id = string.format("E_%s", key)
 				local hingePos = Vector3.new(center.X + half, floorY + doorH / 2, center.Z + doorW / 2 - 0.15)
 				-- Door fills opening; thickness along X
 				local size = Vector3.new(map.DoorThickness, doorH, doorW - 0.2)
-				local closed = CFrame.new(hingePos) * CFrame.new(0, 0, -(doorW - 0.2) / 2)
-				-- Open: rotate around hinge (+Y) into west room (-X side) ~95 deg
-				local openAngle = math.rad(map.DoorOpenAngleDegrees)
-				local open = CFrame.new(hingePos) * CFrame.Angles(0, openAngle, 0) * CFrame.new(0, 0, -(doorW - 0.2) / 2)
-				createDoor(id, CFrame.new(hingePos), closed, open, size)
+				local hingeCF = CFrame.new(hingePos)
+				local closed = hingeCF * CFrame.new(0, 0, -(doorW - 0.2) / 2)
+				createDoor(id, hingeCF, closed, size)
 				builtEastDoor[key] = true
 
 				-- Prompt-friendly doorframe trim
@@ -414,10 +407,9 @@ for col = 1, cols do
 				local id = string.format("S_%s", key)
 				local hingePos = Vector3.new(center.X + doorW / 2 - 0.15, floorY + doorH / 2, center.Z + half)
 				local size = Vector3.new(doorW - 0.2, doorH, map.DoorThickness)
-				local closed = CFrame.new(hingePos) * CFrame.new(-(doorW - 0.2) / 2, 0, 0)
-				local openAngle = math.rad(map.DoorOpenAngleDegrees)
-				local open = CFrame.new(hingePos) * CFrame.Angles(0, openAngle, 0) * CFrame.new(-(doorW - 0.2) / 2, 0, 0)
-				createDoor(id, CFrame.new(hingePos), closed, open, size)
+				local hingeCF = CFrame.new(hingePos)
+				local closed = hingeCF * CFrame.new(-(doorW - 0.2) / 2, 0, 0)
+				createDoor(id, hingeCF, closed, size)
 				builtSouthDoor[key] = true
 
 				makePart(
