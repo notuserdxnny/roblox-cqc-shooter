@@ -120,16 +120,119 @@ if post then
 	end
 end
 
-local floorColors = {
-	Color3.fromRGB(62, 70, 88), -- blue-gray
-	Color3.fromRGB(78, 62, 58), -- warm brick
-	Color3.fromRGB(58, 78, 68), -- green slate
-	Color3.fromRGB(88, 78, 58), -- sand
-	Color3.fromRGB(70, 58, 82), -- purple tint
-	Color3.fromRGB(55, 60, 66), -- dark
-	Color3.fromRGB(90, 72, 62), -- terracotta
-	Color3.fromRGB(50, 68, 80), -- teal
-	Color3.fromRGB(72, 72, 72), -- neutral
+--[[
+	Distinct per-room art themes (colors, materials, lamps, trim, floor pattern).
+	Gameplay (doors / half-walls / spawns) unchanged.
+]]
+local roomThemes = {
+	{ -- 1,1 START — briefing blue
+		Name = "Briefing",
+		Floor = Color3.fromRGB(48, 58, 78),
+		FloorMat = Enum.Material.DiamondPlate,
+		FloorAccent = Color3.fromRGB(70, 110, 180),
+		Wall = Color3.fromRGB(72, 82, 102),
+		WallInner = Color3.fromRGB(58, 68, 88),
+		Trim = Color3.fromRGB(120, 160, 220),
+		Ceiling = Color3.fromRGB(32, 38, 52),
+		Lamp = Color3.fromRGB(180, 210, 255),
+		LampBright = 2.0,
+	},
+	{ -- 1,2 — locker green
+		Name = "Lockers",
+		Floor = Color3.fromRGB(42, 58, 48),
+		FloorMat = Enum.Material.Slate,
+		FloorAccent = Color3.fromRGB(60, 140, 90),
+		Wall = Color3.fromRGB(58, 78, 68),
+		WallInner = Color3.fromRGB(48, 64, 56),
+		Trim = Color3.fromRGB(90, 180, 120),
+		Ceiling = Color3.fromRGB(28, 36, 32),
+		Lamp = Color3.fromRGB(200, 255, 210),
+		LampBright = 1.7,
+	},
+	{ -- 1,3 — server / cold
+		Name = "Server",
+		Floor = Color3.fromRGB(40, 48, 58),
+		FloorMat = Enum.Material.Metal,
+		FloorAccent = Color3.fromRGB(80, 200, 255),
+		Wall = Color3.fromRGB(50, 60, 72),
+		WallInner = Color3.fromRGB(40, 50, 62),
+		Trim = Color3.fromRGB(60, 180, 220),
+		Ceiling = Color3.fromRGB(24, 28, 36),
+		Lamp = Color3.fromRGB(140, 220, 255),
+		LampBright = 1.9,
+	},
+	{ -- 2,1 — armory warm
+		Name = "Armory",
+		Floor = Color3.fromRGB(72, 52, 42),
+		FloorMat = Enum.Material.Concrete,
+		FloorAccent = Color3.fromRGB(200, 120, 60),
+		Wall = Color3.fromRGB(88, 68, 58),
+		WallInner = Color3.fromRGB(72, 54, 46),
+		Trim = Color3.fromRGB(220, 150, 70),
+		Ceiling = Color3.fromRGB(40, 30, 26),
+		Lamp = Color3.fromRGB(255, 210, 150),
+		LampBright = 1.8,
+	},
+	{ -- 2,2 CENTER — ops orange
+		Name = "Ops",
+		Floor = Color3.fromRGB(58, 50, 42),
+		FloorMat = Enum.Material.DiamondPlate,
+		FloorAccent = Color3.fromRGB(255, 140, 50),
+		Wall = Color3.fromRGB(70, 62, 52),
+		WallInner = Color3.fromRGB(58, 50, 42),
+		Trim = Color3.fromRGB(255, 160, 60),
+		Ceiling = Color3.fromRGB(36, 32, 28),
+		Lamp = Color3.fromRGB(255, 190, 120),
+		LampBright = 2.1,
+	},
+	{ -- 2,3 — med bay white/cyan
+		Name = "MedBay",
+		Floor = Color3.fromRGB(200, 210, 220),
+		FloorMat = Enum.Material.SmoothPlastic,
+		FloorAccent = Color3.fromRGB(80, 200, 200),
+		Wall = Color3.fromRGB(210, 220, 230),
+		WallInner = Color3.fromRGB(190, 200, 210),
+		Trim = Color3.fromRGB(60, 180, 190),
+		Ceiling = Color3.fromRGB(230, 235, 240),
+		Lamp = Color3.fromRGB(230, 255, 255),
+		LampBright = 2.2,
+	},
+	{ -- 3,1 — storage wood
+		Name = "Storage",
+		Floor = Color3.fromRGB(78, 62, 42),
+		FloorMat = Enum.Material.WoodPlanks,
+		FloorAccent = Color3.fromRGB(160, 110, 50),
+		Wall = Color3.fromRGB(92, 78, 58),
+		WallInner = Color3.fromRGB(78, 64, 48),
+		Trim = Color3.fromRGB(180, 140, 70),
+		Ceiling = Color3.fromRGB(50, 42, 32),
+		Lamp = Color3.fromRGB(255, 220, 160),
+		LampBright = 1.6,
+	},
+	{ -- 3,2 — range dark
+		Name = "Range",
+		Floor = Color3.fromRGB(36, 38, 42),
+		FloorMat = Enum.Material.Asphalt,
+		FloorAccent = Color3.fromRGB(220, 60, 60),
+		Wall = Color3.fromRGB(48, 50, 56),
+		WallInner = Color3.fromRGB(38, 40, 46),
+		Trim = Color3.fromRGB(200, 70, 70),
+		Ceiling = Color3.fromRGB(22, 24, 28),
+		Lamp = Color3.fromRGB(255, 180, 160),
+		LampBright = 1.5,
+	},
+	{ -- 3,3 — vault purple
+		Name = "Vault",
+		Floor = Color3.fromRGB(48, 40, 62),
+		FloorMat = Enum.Material.Metal,
+		FloorAccent = Color3.fromRGB(160, 80, 255),
+		Wall = Color3.fromRGB(58, 48, 78),
+		WallInner = Color3.fromRGB(46, 38, 64),
+		Trim = Color3.fromRGB(170, 100, 255),
+		Ceiling = Color3.fromRGB(28, 22, 40),
+		Lamp = Color3.fromRGB(200, 160, 255),
+		LampBright = 1.9,
+	},
 }
 
 local wallColor = Color3.fromRGB(90, 94, 104)
@@ -138,6 +241,116 @@ local trimColor = Color3.fromRGB(120, 124, 136)
 local doorColor = Color3.fromRGB(110, 70, 45)
 local halfWallColor = Color3.fromRGB(95, 98, 108)
 local crawlColor = Color3.fromRGB(70, 74, 84)
+
+local function themeFor(col: number, row: number)
+	local idx = ((col - 1) + (row - 1) * cols) % #roomThemes + 1
+	return roomThemes[idx]
+end
+
+local function addFloorPattern(roomFolder: Folder, center: Vector3, theme: any)
+	-- Checker / stripe accents (non-colliding) for readable CQC floors
+	local tile = 4
+	local half = roomSize / 2 - 1.5
+	local accent = theme.FloorAccent :: Color3
+	local base = theme.Floor :: Color3
+	local n = 0
+	for x = -half, half, tile do
+		for z = -half, half, tile do
+			n += 1
+			if (math.floor((x + half) / tile) + math.floor((z + half) / tile)) % 2 == 0 then
+				local p = makePart(
+					"FloorTile" .. n,
+					Vector3.new(tile - 0.35, 0.06, tile - 0.35),
+					CFrame.new(center.X + x, floorY + 0.08, center.Z + z),
+					accent:Lerp(base, 0.55),
+					Enum.Material.SmoothPlastic,
+					roomFolder
+				)
+				p.CanCollide = false
+				p.CanQuery = false
+				p.Transparency = 0.35
+			end
+		end
+	end
+	-- Center accent disc
+	local disc = makePart(
+		"FloorCenter",
+		Vector3.new(6, 0.08, 6),
+		CFrame.new(center.X, floorY + 0.1, center.Z),
+		accent,
+		Enum.Material.Neon,
+		roomFolder
+	)
+	disc.CanCollide = false
+	disc.CanQuery = false
+	disc.Transparency = 0.55
+end
+
+local function addCeilingLamp(roomFolder: Folder, center: Vector3, theme: any)
+	-- Fixture housing
+	local housing = makePart(
+		"LampHousing",
+		Vector3.new(3.2, 0.35, 1.4),
+		CFrame.new(center.X, floorY + wallH - 0.4, center.Z),
+		Color3.fromRGB(40, 44, 52),
+		Enum.Material.Metal,
+		roomFolder
+	)
+	housing.CanCollide = false
+	housing.CanQuery = false
+	-- Neon tube
+	local tube = makePart(
+		"LampTube",
+		Vector3.new(2.8, 0.22, 0.55),
+		CFrame.new(center.X, floorY + wallH - 0.55, center.Z),
+		theme.Lamp,
+		Enum.Material.Neon,
+		roomFolder
+	)
+	tube.CanCollide = false
+	tube.CanQuery = false
+	local pl = Instance.new("PointLight")
+	pl.Brightness = theme.LampBright or 1.8
+	pl.Range = roomSize * 0.9
+	pl.Color = theme.Lamp
+	pl.Parent = tube
+	-- Soft fill
+	local fill = Instance.new("SpotLight")
+	fill.Brightness = 0.8
+	fill.Range = roomSize
+	fill.Angle = 90
+	fill.Face = Enum.NormalId.Bottom
+	fill.Color = theme.Lamp
+	fill.Parent = tube
+end
+
+local function addWallTrim(roomFolder: Folder, center: Vector3, theme: any)
+	local half = roomSize / 2
+	local trimH = 0.35
+	local y = floorY + 3.2
+	local tcol = theme.Trim
+	-- Mid-wall rail strips (N/S/E/W), non-blocking
+	local rails = {
+		{ Vector3.new(roomSize - 2, trimH, 0.2), Vector3.new(center.X, y, center.Z - half + 0.35) },
+		{ Vector3.new(roomSize - 2, trimH, 0.2), Vector3.new(center.X, y, center.Z + half - 0.35) },
+		{ Vector3.new(0.2, trimH, roomSize - 2), Vector3.new(center.X - half + 0.35, y, center.Z) },
+		{ Vector3.new(0.2, trimH, roomSize - 2), Vector3.new(center.X + half - 0.35, y, center.Z) },
+	}
+	for i, rail in rails do
+		local p = makePart("WallTrim" .. i, rail[1], CFrame.new(rail[2]), tcol, Enum.Material.Metal, roomFolder)
+		p.CanCollide = false
+		p.CanQuery = false
+	end
+	-- Baseboard
+	local baseY = floorY + 0.35
+	for i, rail in rails do
+		local size = Vector3.new(rail[1].X, 0.5, rail[1].Z)
+		local pos = Vector3.new(rail[2].X, baseY, rail[2].Z)
+		local p = makePart("Baseboard" .. i, size, CFrame.new(pos), tcol:Lerp(Color3.new(0, 0, 0), 0.35), Enum.Material.SmoothPlastic, roomFolder)
+		p.CanCollide = false
+		p.CanQuery = false
+	end
+end
 
 local function roomCenter(col: number, row: number): Vector3
 	-- col/row 1-based; origin at room (1,1) center
@@ -281,30 +494,34 @@ for col = 1, cols do
 		roomFolder.Name = "Room_" .. roomKey(col, row)
 		roomFolder.Parent = roomsFolder
 
-		local colorIdx = ((col - 1) + (row - 1) * cols) % #floorColors + 1
-		local fcol = floorColors[colorIdx]
+		local theme = themeFor(col, row)
+		-- Apply theme wall colors for this room's wallSegmentsWithDoor calls
+		wallColor = theme.Wall
+		wallInner = theme.WallInner
+		trimColor = theme.Trim
 
 		-- Floor
 		makePart(
 			"Floor",
 			Vector3.new(roomSize, 1.2, roomSize),
 			CFrame.new(center.X, floorY - 0.6, center.Z),
-			fcol,
-			Enum.Material.Slate,
+			theme.Floor,
+			theme.FloorMat or Enum.Material.Slate,
 			roomFolder
 		)
 
-		-- Thin color plate on top for readability
+		-- Thin plate + pattern
 		local plate = makePart(
 			"FloorPlate",
 			Vector3.new(roomSize - 1, 0.1, roomSize - 1),
 			CFrame.new(center.X, floorY + 0.05, center.Z),
-			fcol:Lerp(Color3.new(1, 1, 1), 0.08),
-			Enum.Material.Concrete,
+			theme.Floor:Lerp(Color3.new(1, 1, 1), 0.06),
+			Enum.Material.SmoothPlastic,
 			roomFolder
 		)
 		plate.CanCollide = false
 		plate.CanQuery = false
+		addFloorPattern(roomFolder, center, theme)
 
 		-- Ceiling
 		if map.Ceiling then
@@ -312,32 +529,17 @@ for col = 1, cols do
 				"Ceiling",
 				Vector3.new(roomSize, 1, roomSize),
 				CFrame.new(center.X, floorY + wallH + 0.5, center.Z),
-				Color3.fromRGB(45, 48, 55),
+				theme.Ceiling,
 				Enum.Material.Concrete,
 				roomFolder
 			)
 			ceil.CanQuery = true
 		end
 
-		-- Per-room light
-		local lightAnchor = makePart(
-			"LightAnchor",
-			Vector3.new(1, 0.4, 1),
-			CFrame.new(center.X, floorY + wallH - 1.2, center.Z),
-			Color3.fromRGB(255, 240, 200),
-			Enum.Material.Neon,
-			roomFolder
-		)
-		lightAnchor.CanCollide = false
-		lightAnchor.CanQuery = false
-		lightAnchor.Transparency = 0.35
-		local pl = Instance.new("PointLight")
-		pl.Brightness = 1.6 + ((col + row) % 3) * 0.25
-		pl.Range = roomSize * 0.85
-		pl.Color = Color3.fromRGB(255, 230, 200):Lerp(Color3.fromRGB(180, 200, 255), ((col * 3 + row) % 5) / 5)
-		pl.Parent = lightAnchor
+		addCeilingLamp(roomFolder, center, theme)
+		addWallTrim(roomFolder, center, theme)
 
-		-- Room label
+		-- Room label (theme name)
 		local labelPart = makePart(
 			"Label",
 			Vector3.new(0.2, 0.2, 0.2),
@@ -350,7 +552,7 @@ for col = 1, cols do
 		labelPart.CanQuery = false
 		labelPart.Transparency = 1
 		local bill = Instance.new("BillboardGui")
-		bill.Size = UDim2.fromOffset(120, 24)
+		bill.Size = UDim2.fromOffset(140, 28)
 		bill.StudsOffset = Vector3.new(0, 3, 0)
 		bill.AlwaysOnTop = false
 		bill.Parent = labelPart
@@ -358,10 +560,10 @@ for col = 1, cols do
 		lab.Size = UDim2.fromScale(1, 1)
 		lab.BackgroundTransparency = 1
 		lab.Text = if col == map.StartCol and row == map.StartRow
-			then "START"
-			else string.format("R%d-%d", col, row)
-		lab.TextColor3 = Color3.fromRGB(220, 220, 230)
-		lab.TextStrokeTransparency = 0.5
+			then "START · " .. theme.Name
+			else theme.Name
+		lab.TextColor3 = theme.Trim
+		lab.TextStrokeTransparency = 0.45
 		lab.Font = Enum.Font.GothamBold
 		lab.TextScaled = true
 		lab.Parent = bill
@@ -648,6 +850,7 @@ local npcRooms = {
 	{ 3, 1 },
 	{ 1, 3 },
 	{ 3, 3 },
+	{ 2, 2 },
 }
 for i, pair in npcRooms do
 	local c = roomCenter(pair[1], pair[2])
@@ -660,6 +863,31 @@ for i, pair in npcRooms do
 	mark.Size = Vector3.new(1, 1, 1)
 	mark.Position = Vector3.new(c.X, floorY + Config.Arena.SpawnHeight, c.Z)
 	mark.Parent = npcMarks
+end
+
+-- Extra bot patrol waypoints (cover corners + mid-doors)
+local botWp = Instance.new("Folder")
+botWp.Name = "BotWaypoints"
+botWp.Parent = folder
+local wpIndex = 0
+local function addBotWp(pos: Vector3)
+	wpIndex += 1
+	local mark = Instance.new("Part")
+	mark.Name = "BotWP" .. wpIndex
+	mark.Anchored = true
+	mark.CanCollide = false
+	mark.CanQuery = false
+	mark.Transparency = 1
+	mark.Size = Vector3.new(1, 1, 1)
+	mark.Position = Vector3.new(pos.X, floorY + Config.Arena.SpawnHeight, pos.Z)
+	mark.Parent = botWp
+end
+for col = 1, cols do
+	for row = 1, rows do
+		local c = roomCenter(col, row)
+		addBotWp(c + Vector3.new(-8, 0, -8))
+		addBotWp(c + Vector3.new(8, 0, 8))
+	end
 end
 
 
