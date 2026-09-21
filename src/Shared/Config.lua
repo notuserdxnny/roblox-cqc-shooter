@@ -349,4 +349,307 @@ Config.Remotes = {
 	MeleeAttack = "MeleeAttack", -- C→S origin + look (OITC empty ammo)
 }
 
+
+
+-- ============================================================================
+-- Economy / Credits (server-authoritative awards)
+-- ============================================================================
+Config.Economy = {
+	StartingCredits = 100,
+	CreditsPerKill = 25,
+	CreditsPerWin = 100,
+	CreditsPerMatchPlayed = 10, -- consolation if not winner
+	DataStoreName = "CQCPlayerData_v1",
+	DataStoreKeyPrefix = "plr_",
+	SaveDebounceSeconds = 4,
+}
+
+--[[
+	Shop catalog — Parts/Color3 only (no MeshAssets).
+	Categories: PistolSkin, KnifeSkin, Trail, Hitmarker, Title
+	Default items are free + owned on first join.
+]]
+Config.ShopItems = {
+	-- Pistol skins
+	{
+		Id = "pistol_default",
+		Name = "Stock Iron",
+		Category = "PistolSkin",
+		Price = 0,
+		Default = true,
+		HandleColor = Color3.fromRGB(32, 32, 38),
+		TipColor = Color3.fromRGB(220, 200, 80),
+		DisplayName = "Pistol",
+		Description = "Factory finish.",
+	},
+	{
+		Id = "pistol_crimson",
+		Name = "Crimson Edge",
+		Category = "PistolSkin",
+		Price = 150,
+		HandleColor = Color3.fromRGB(90, 18, 28),
+		TipColor = Color3.fromRGB(255, 60, 70),
+		DisplayName = "Crimson Pistol",
+		Description = "Blood-red grip and neon tip.",
+	},
+	{
+		Id = "pistol_arctic",
+		Name = "Arctic Frost",
+		Category = "PistolSkin",
+		Price = 200,
+		HandleColor = Color3.fromRGB(200, 220, 235),
+		TipColor = Color3.fromRGB(100, 200, 255),
+		DisplayName = "Arctic Pistol",
+		Description = "Ice-white frame, cyan muzzle.",
+	},
+	{
+		Id = "pistol_gold",
+		Name = "Gilded Chamber",
+		Category = "PistolSkin",
+		Price = 350,
+		HandleColor = Color3.fromRGB(180, 140, 40),
+		TipColor = Color3.fromRGB(255, 220, 80),
+		DisplayName = "Gold Pistol",
+		Description = "Flashy gold plating.",
+	},
+	{
+		Id = "pistol_void",
+		Name = "Void Protocol",
+		Category = "PistolSkin",
+		Price = 300,
+		HandleColor = Color3.fromRGB(20, 12, 40),
+		TipColor = Color3.fromRGB(160, 80, 255),
+		DisplayName = "Void Pistol",
+		Description = "Deep purple neon accents.",
+	},
+	{
+		Id = "pistol_neon",
+		Name = "Toxic Neon",
+		Category = "PistolSkin",
+		Price = 250,
+		HandleColor = Color3.fromRGB(20, 40, 24),
+		TipColor = Color3.fromRGB(80, 255, 120),
+		DisplayName = "Neon Pistol",
+		Description = "Toxic green glow tip.",
+	},
+	-- Knife skins
+	{
+		Id = "knife_default",
+		Name = "Standard Blade",
+		Category = "KnifeSkin",
+		Price = 0,
+		Default = true,
+		HandleColor = Color3.fromRGB(180, 180, 190),
+		TipColor = Color3.fromRGB(220, 40, 40),
+		DisplayName = "Knife",
+		Description = "Issue combat knife.",
+	},
+	{
+		Id = "knife_blood",
+		Name = "Bloodletter",
+		Category = "KnifeSkin",
+		Price = 175,
+		HandleColor = Color3.fromRGB(60, 20, 24),
+		TipColor = Color3.fromRGB(255, 40, 60),
+		DisplayName = "Blood Knife",
+		Description = "Dark grip, glowing red blade.",
+	},
+	{
+		Id = "knife_chrome",
+		Name = "Chrome Edge",
+		Category = "KnifeSkin",
+		Price = 200,
+		HandleColor = Color3.fromRGB(210, 215, 225),
+		TipColor = Color3.fromRGB(240, 245, 255),
+		DisplayName = "Chrome Knife",
+		Description = "Mirror-finish steel.",
+	},
+	{
+		Id = "knife_ember",
+		Name = "Ember Fang",
+		Category = "KnifeSkin",
+		Price = 275,
+		HandleColor = Color3.fromRGB(50, 28, 18),
+		TipColor = Color3.fromRGB(255, 140, 40),
+		DisplayName = "Ember Knife",
+		Description = "Smoldering orange blade.",
+	},
+	-- Trails (color applied to character Trail on match start)
+	{
+		Id = "trail_none",
+		Name = "No Trail",
+		Category = "Trail",
+		Price = 0,
+		Default = true,
+		TrailColor = Color3.fromRGB(255, 255, 255),
+		TrailEnabled = false,
+		Description = "No movement trail.",
+	},
+	{
+		Id = "trail_cyan",
+		Name = "Cyan Wake",
+		Category = "Trail",
+		Price = 125,
+		TrailColor = Color3.fromRGB(60, 200, 255),
+		TrailEnabled = true,
+		Description = "Bright cyan movement trail.",
+	},
+	{
+		Id = "trail_gold",
+		Name = "Gold Wake",
+		Category = "Trail",
+		Price = 200,
+		TrailColor = Color3.fromRGB(255, 200, 60),
+		TrailEnabled = true,
+		Description = "Golden movement trail.",
+	},
+	-- Hitmarker styles (client FX tint)
+	{
+		Id = "hit_default",
+		Name = "Classic X",
+		Category = "Hitmarker",
+		Price = 0,
+		Default = true,
+		HitColor = Color3.fromRGB(255, 255, 255),
+		HitHeadColor = Color3.fromRGB(255, 70, 70),
+		Description = "Standard white hitmarker.",
+	},
+	{
+		Id = "hit_lime",
+		Name = "Lime Confirm",
+		Category = "Hitmarker",
+		Price = 100,
+		HitColor = Color3.fromRGB(120, 255, 80),
+		HitHeadColor = Color3.fromRGB(255, 220, 40),
+		Description = "Lime body / yellow head.",
+	},
+	{
+		Id = "hit_magenta",
+		Name = "Magenta Pulse",
+		Category = "Hitmarker",
+		Price = 150,
+		HitColor = Color3.fromRGB(255, 80, 200),
+		HitHeadColor = Color3.fromRGB(255, 40, 120),
+		Description = "Hot magenta markers.",
+	},
+	-- Lobby / match titles (Billboard above head)
+	{
+		Id = "title_none",
+		Name = "No Title",
+		Category = "Title",
+		Price = 0,
+		Default = true,
+		TitleText = "",
+		TitleColor = Color3.fromRGB(200, 200, 210),
+		Description = "No title above your name.",
+	},
+	{
+		Id = "title_rookie",
+		Name = "Rookie",
+		Category = "Title",
+		Price = 50,
+		TitleText = "ROOKIE",
+		TitleColor = Color3.fromRGB(140, 180, 220),
+		Description = "Starter lobby title.",
+	},
+	{
+		Id = "title_chamber",
+		Name = "One Chamber",
+		Category = "Title",
+		Price = 175,
+		TitleText = "ONE CHAMBER",
+		TitleColor = Color3.fromRGB(255, 180, 80),
+		Description = "OITC-flavored title.",
+	},
+	{
+		Id = "title_ace",
+		Name = "Ace",
+		Category = "Title",
+		Price = 300,
+		TitleText = "ACE",
+		TitleColor = Color3.fromRGB(255, 220, 80),
+		Description = "Gold Ace title.",
+	},
+}
+
+function Config.GetShopItem(id: string): any?
+	for _, item in Config.ShopItems do
+		if item.Id == id then
+			return item
+		end
+	end
+	return nil
+end
+
+function Config.GetShopItemsByCategory(category: string): { any }
+	local list = {}
+	for _, item in Config.ShopItems do
+		if item.Category == category then
+			table.insert(list, item)
+		end
+	end
+	return list
+end
+
+function Config.GetDefaultShopIds(): { [string]: string }
+	local defaults = {
+		PistolSkin = "pistol_default",
+		KnifeSkin = "knife_default",
+		Trail = "trail_none",
+		Hitmarker = "hit_default",
+		Title = "title_none",
+	}
+	for _, item in Config.ShopItems do
+		if item.Default == true and defaults[item.Category] == nil then
+			defaults[item.Category] = item.Id
+		elseif item.Default == true then
+			defaults[item.Category] = item.Id
+		end
+	end
+	return defaults
+end
+
+-- Tuned volumes + knife whoosh / door
+Config.SoundIds.KnifeWhoosh = "rbxassetid://9113895097"
+Config.SoundIds.Door = "rbxassetid://9113895097"
+Config.SoundVolumes.Fire = 0.48
+Config.SoundVolumes.FireAlt = 0.22
+Config.SoundVolumes.Reload = 0.45
+Config.SoundVolumes.Empty = 0.4
+Config.SoundVolumes.HitConfirm = 0.5
+Config.SoundVolumes.Headshot = 0.65
+Config.SoundVolumes.Melee = 0.55
+Config.SoundVolumes.KnifeWhoosh = 0.35
+Config.SoundVolumes.Door = 0.28
+Config.SoundVolumes.RoundStart = 0.5
+Config.SoundVolumes.CountdownTick = 0.3
+
+-- Match lighting / post (gentle, keep CQC readable)
+Config.Lighting.Post = {
+	ColorCorrection = {
+		Brightness = 0.02,
+		Contrast = 0.08,
+		Saturation = 0.05,
+		TintColor = Color3.fromRGB(245, 248, 255),
+	},
+	Bloom = {
+		Intensity = 0.35,
+		Size = 18,
+		Threshold = 1.1,
+	},
+}
+
+-- Extra remotes for shop / data
+Config.Remotes.GetShop = "GetShop"
+Config.Remotes.PurchaseItem = "PurchaseItem"
+Config.Remotes.EquipItem = "EquipItem"
+Config.Remotes.CreditsUpdate = "CreditsUpdate"
+Config.Remotes.PlayerDataSync = "PlayerDataSync"
+Config.Remotes.ShopResult = "ShopResult"
+
+Config.Feel.HitMarkerSeconds = 0.14
+Config.Feel.HeadshotMarkerSeconds = 0.2
+Config.Feel.DamageFlashSeconds = 0.18
+Config.Feel.DamageFlashTransparency = 0.72
+
 return Config
