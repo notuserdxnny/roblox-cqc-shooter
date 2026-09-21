@@ -1,7 +1,7 @@
 --!strict
 --[[
 	Shared game configuration for the CQC room shooter.
-	Tune weapons, feel, sounds, room layout, and hub here.
+	Tune weapons, feel, sounds, room layout, hub, and OITC here.
 ]]
 
 local Config = {}
@@ -112,6 +112,10 @@ function Config.IsWeaponTool(tool: Instance?): boolean
 	return tool ~= nil and tool:IsA("Tool") and Config.GetWeaponByToolName(tool.Name) ~= nil
 end
 
+function Config.IsMeleeTool(tool: Instance?): boolean
+	return tool ~= nil and tool:IsA("Tool") and tool.Name == "Knife"
+end
+
 -- Legacy single-weapon alias (SMG) for any leftover reads
 Config.Weapon = Config.Weapons.SMG
 
@@ -157,6 +161,7 @@ Config.SoundIds = {
 	Empty = "rbxassetid://9113895097",
 	HitConfirm = "rbxassetid://9114221327",
 	Headshot = "rbxassetid://9114222212",
+	Melee = "rbxassetid://9114221327",
 }
 
 Config.SoundVolumes = {
@@ -166,6 +171,7 @@ Config.SoundVolumes = {
 	Empty = 0.45,
 	HitConfirm = 0.55,
 	Headshot = 0.7,
+	Melee = 0.6,
 }
 
 Config.Arena = {
@@ -239,8 +245,46 @@ Config.Camera = {
 
 Config.Hub = {
 	Title = "CQC ROOM SHOOTER",
-	Subtitle = "Pick a starter weapon, then clear the rooms.",
-	HowTo = "Hold LMB to fire · R reload · Hotbar 1–3 switch guns · Doors open away from you · Jump half-walls · Slide crawl gaps",
+	Subtitle = "Pick a mode, then Start. Casual = full loadout · OITC = one bullet.",
+	HowTo = "Hold LMB to fire · R reload (Casual) · Hotbar switch · Doors open away from you · Jump half-walls · Slide crawl gaps",
+	HowToOITC = "Pistol only · 1 bullet · Kill = +1 ammo · Empty = Knife melee · First to KillsToWin wins · Respawn resets to 1 bullet",
+}
+
+--[[
+	Game modes. Casual = current three-gun freeplay.
+	One in the Chamber = pistol + 1 bullet, kill awards ammo, melee when empty.
+]]
+Config.Modes = {
+	Casual = "Casual",
+	OITC = "OITC",
+}
+
+Config.DefaultMode = "Casual"
+
+--[[
+	One in the Chamber rules (classic).
+]]
+Config.OITC = {
+	KillsToWin = 5,
+	StartingAmmo = 1,
+	-- Display mag size while in OITC (ammo is free-form count of bullets)
+	MagazineDisplay = 1,
+	WeaponId = "Pistol",
+	AllowReload = false,
+	ResetAmmoOnSpawn = true,
+	GunDamage = 100, -- one-shot in OITC (classic)
+	MeleeRange = 7,
+	MeleeDamage = 100,
+	MeleeCooldown = 0.5,
+	MeleeToolName = "Knife",
+	WinnerRestartSeconds = 6,
+}
+
+Config.Melee = {
+	HandleSize = Vector3.new(0.28, 0.28, 1.4),
+	HandleColor = Color3.fromRGB(180, 180, 190),
+	TipColor = Color3.fromRGB(220, 40, 40),
+	ToolTip = "Melee · LMB when out of bullets",
 }
 
 -- Remotes (names under ReplicatedStorage.Remotes)
@@ -251,8 +295,11 @@ Config.Remotes = {
 	KillFeed = "KillFeed",
 	StatsUpdate = "StatsUpdate",
 	ToggleDoor = "ToggleDoor",
-	StartMatch = "StartMatch", -- C→S { weaponId: string }
-	MatchStarted = "MatchStarted", -- S→C { weaponId: string }
+	StartMatch = "StartMatch", -- C→S { weaponId, mode }
+	MatchStarted = "MatchStarted", -- S→C { weaponId, mode, inMatch }
+	MatchEnded = "MatchEnded", -- S→C { winnerName, mode, kills }
+	ReturnToHub = "ReturnToHub", -- C→S request hub / S→C force hub
+	MeleeAttack = "MeleeAttack", -- C→S origin + look (OITC empty ammo)
 }
 
 return Config
