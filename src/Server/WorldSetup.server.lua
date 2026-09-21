@@ -1,21 +1,49 @@
 --!strict
 --[[
-	Builds a readable CQC arena: varied floor, walls + trim, 8–12 cover pieces
-	(low walls, crates, L-shapes) that block raycasts, spawn pads, outdoor lighting.
-	Safe to run on an empty Baseplate. Leaves movement lanes open.
+	Builds a CQC room complex: grid of square rooms with doorways,
+	server-tweened doors, waist-high half-walls / crawl gaps, per-room lighting,
+	varied floor colors, spawn in start room, NPC spawn markers.
 ]]
 
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local DoorService = require(script.Parent:WaitForChild("Modules"):WaitForChild("DoorService"))
 
-local arena = Config.Arena
-local half = arena.Size / 2
-local floorY = arena.FloorY
+local map = Config.Map
+local floorY = map.FloorY
+local roomSize = map.RoomSize
+local wallH = map.WallHeight
+local wallT = map.WallThickness
+local doorW = map.DoorWidth
+local doorH = map.DoorHeight
+local cols = map.GridCols
+local rows = map.GridRows
+
+-- Pitch between room centers (= room size; shared walls)
+local pitch = roomSize
+
+DoorService.Init()
 
 local folder = Instance.new("Folder")
 folder.Name = "CQCArena"
 folder.Parent = workspace
+
+local roomsFolder = Instance.new("Folder")
+roomsFolder.Name = "Rooms"
+roomsFolder.Parent = folder
+
+local doorsFolder = Instance.new("Folder")
+doorsFolder.Name = "Doors"
+doorsFolder.Parent = folder
+
+local coverFolder = Instance.new("Folder")
+coverFolder.Name = "Cover"
+coverFolder.Parent = folder
+
+local spawnFolder = Instance.new("Folder")
+spawnFolder.Name = "SpawnPoints"
+spawnFolder.Parent = folder
 
 local function makePart(
 	name: string,
@@ -41,7 +69,7 @@ local function makePart(
 	return p
 end
 
--- Clear default baseplate / spawn so we don't float above missing geometry
+-- Clear default baseplate / spawn
 local baseplate = workspace:FindFirstChild("Baseplate")
 if baseplate and baseplate:IsA("BasePart") then
 	baseplate:Destroy()
@@ -51,7 +79,7 @@ if spawnLoc then
 	spawnLoc:Destroy()
 end
 
--- Outdoor-ish lighting
+-- Indoor lighting
 local lit = Config.Lighting
 Lighting.Ambient = lit.Ambient
 Lighting.OutdoorAmbient = lit.OutdoorAmbient
@@ -60,244 +88,519 @@ Lighting.ClockTime = lit.ClockTime
 Lighting.GeographicLatitude = lit.GeographicLatitude
 Lighting.GlobalShadows = true
 pcall(function()
-	Lighting.EnvironmentDiffuseScale = 0.85
-	Lighting.EnvironmentSpecularScale = 0.4
+	Lighting.EnvironmentDiffuseScale = 0.4
+	Lighting.EnvironmentSpecularScale = 0.25
 end)
 
--- Main floor
-makePart(
-	"Floor",
-	Vector3.new(arena.Size, 2, arena.Size),
-	CFrame.new(0, floorY - 1, 0),
-	Color3.fromRGB(48, 52, 58),
-	Enum.Material.Slate
-)
+local floorColors = {
+	Color3.fromRGB(62, 70, 88), -- blue-gray
+	Color3.fromRGB(78, 62, 58), -- warm brick
+	Color3.fromRGB(58, 78, 68), -- green slate
+	Color3.fromRGB(88, 78, 58), -- sand
+	Color3.fromRGB(70, 58, 82), -- purple tint
+	Color3.fromRGB(55, 60, 66), -- dark
+	Color3.fromRGB(90, 72, 62), -- terracotta
+	Color3.fromRGB(50, 68, 80), -- teal
+	Color3.fromRGB(72, 72, 72), -- neutral
+}
 
--- Floor color / material variation tiles (slightly raised decorative, still walkable)
-local tileFolder = Instance.new("Folder")
-tileFolder.Name = "FloorTiles"
-tileFolder.Parent = folder
-local tileColors = {
-	Color3.fromRGB(62, 66, 72),
-	Color3.fromRGB(52, 58, 64),
-	Color3.fromRGB(70, 68, 60),
-	Color3.fromRGB(55, 60, 68),
-}
-local tileMats = {
-	Enum.Material.Concrete,
-	Enum.Material.Slate,
-	Enum.Material.Basalt,
-	Enum.Material.Asphalt,
-}
-local tileSize = 12
-local tileHalf = math.floor(half / tileSize) * tileSize
-for x = -tileHalf + tileSize / 2, tileHalf, tileSize do
-	for z = -tileHalf + tileSize / 2, tileHalf, tileSize do
-		local idx = (math.floor(x / tileSize) + math.floor(z / tileSize)) % 4
-		if idx < 0 then
-			idx += 4
+local wallColor = Color3.fromRGB(90, 94, 104)
+local wallInner = Color3.fromRGB(78, 82, 92)
+local trimColor = Color3.fromRGB(120, 124, 136)
+local doorColor = Color3.fromRGB(110, 70, 45)
+local halfWallColor = Color3.fromRGB(95, 98, 108)
+local crawlColor = Color3.fromRGB(70, 74, 84)
+
+local function roomCenter(col: number, row: number): Vector3
+	-- col/row 1-based; origin at room (1,1) center
+	local x = (col - 1) * pitch
+	local z = (row - 1) * pitch
+	return Vector3.new(x, floorY, z)
+end
+
+local function roomKey(col: number, row: number): string
+	return string.format("%d_%d", col, row)
+end
+
+local function inList(list: { { number } }, col: number, row: number): boolean
+	for _, pair in list do
+		if pair[1] == col and pair[2] == row then
+			return true
 		end
-		-- Checker of thin overlays (visual only; main Floor collides)
-		local overlay = makePart(
-			string.format("Tile_%d_%d", x, z),
-			Vector3.new(tileSize - 0.4, 0.15, tileSize - 0.4),
-			CFrame.new(x, floorY + 0.08, z),
-			tileColors[idx + 1],
-			tileMats[idx + 1],
-			tileFolder
+	end
+	return false
+end
+
+-- Build each room: floor, ceiling, 4 walls with doorway gaps toward neighbors
+local roomCenters: { [string]: Vector3 } = {}
+local doorIdCounter = 0
+
+local function wallSegmentsWithDoor(
+	roomFolder: Folder,
+	namePrefix: string,
+	-- wall runs along axis; center of full wall edge
+	edgeCenter: Vector3,
+	along: Vector3, -- unit along wall length
+	outward: Vector3, -- unit outward (thickness)
+	fullLength: number,
+	hasDoor: boolean
+)
+	--[[
+		Full wall length = roomSize. If hasDoor, leave doorW gap in the middle
+		and place two side segments + optional lintel above door.
+	]]
+	local yMid = floorY + wallH / 2
+	local thick = wallT
+
+	if not hasDoor then
+		makePart(
+			namePrefix,
+			Vector3.new(
+				if math.abs(along.X) > 0.5 then fullLength else thick,
+				wallH,
+				if math.abs(along.Z) > 0.5 then fullLength else thick
+			),
+			CFrame.new(edgeCenter.X, yMid, edgeCenter.Z),
+			wallColor,
+			Enum.Material.Concrete,
+			roomFolder
 		)
-		overlay.CanCollide = false
-		overlay.CanQuery = false
+		return
+	end
+
+	local sideLen = (fullLength - doorW) / 2
+	-- Left segment center: from edge center, move -along * (doorW/2 + sideLen/2)
+	local leftCenter = edgeCenter - along * (doorW / 2 + sideLen / 2)
+	local rightCenter = edgeCenter + along * (doorW / 2 + sideLen / 2)
+
+	local function segSize(): Vector3
+		if math.abs(along.X) > 0.5 then
+			return Vector3.new(sideLen, wallH, thick)
+		end
+		return Vector3.new(thick, wallH, sideLen)
+	end
+
+	makePart(namePrefix .. "_L", segSize(), CFrame.new(leftCenter.X, yMid, leftCenter.Z), wallColor, Enum.Material.Concrete, roomFolder)
+	makePart(namePrefix .. "_R", segSize(), CFrame.new(rightCenter.X, yMid, rightCenter.Z), wallColor, Enum.Material.Concrete, roomFolder)
+
+	-- Lintel above doorway
+	local lintelH = wallH - doorH
+	if lintelH > 0.2 then
+		local lintelY = floorY + doorH + lintelH / 2
+		local lintelSize = if math.abs(along.X) > 0.5
+			then Vector3.new(doorW, lintelH, thick)
+			else Vector3.new(thick, lintelH, doorW)
+		makePart(
+			namePrefix .. "_Lintel",
+			lintelSize,
+			CFrame.new(edgeCenter.X, lintelY, edgeCenter.Z),
+			wallInner,
+			Enum.Material.Concrete,
+			roomFolder
+		)
 	end
 end
 
--- Outer walls
-local t = arena.WallThickness
-local h = arena.WallHeight
-local wallColor = Color3.fromRGB(72, 76, 86)
-local trimColor = Color3.fromRGB(110, 115, 128)
-makePart("WallNorth", Vector3.new(arena.Size + t * 2, h, t), CFrame.new(0, h / 2, -half), wallColor)
-makePart("WallSouth", Vector3.new(arena.Size + t * 2, h, t), CFrame.new(0, h / 2, half), wallColor)
-makePart("WallWest", Vector3.new(t, h, arena.Size), CFrame.new(-half, h / 2, 0), wallColor)
-makePart("WallEast", Vector3.new(t, h, arena.Size), CFrame.new(half, h / 2, 0), wallColor)
+local function createDoor(
+	id: string,
+	hingeWorld: CFrame,
+	closedCFrame: CFrame,
+	openCFrame: CFrame,
+	size: Vector3
+)
+	local door = makePart("Door_" .. id, size, closedCFrame, doorColor, Enum.Material.Wood, doorsFolder)
+	door.CanCollide = true
+	door.CanQuery = true
 
--- Wall top trim (visual rim)
-makePart(
-	"TrimNorth",
-	Vector3.new(arena.Size + t * 2 + 1, 0.6, t + 0.8),
-	CFrame.new(0, h + 0.1, -half),
-	trimColor,
-	Enum.Material.Metal
-)
-makePart(
-	"TrimSouth",
-	Vector3.new(arena.Size + t * 2 + 1, 0.6, t + 0.8),
-	CFrame.new(0, h + 0.1, half),
-	trimColor,
-	Enum.Material.Metal
-)
-makePart(
-	"TrimWest",
-	Vector3.new(t + 0.8, 0.6, arena.Size + 1),
-	CFrame.new(-half, h + 0.1, 0),
-	trimColor,
-	Enum.Material.Metal
-)
-makePart(
-	"TrimEast",
-	Vector3.new(t + 0.8, 0.6, arena.Size + 1),
-	CFrame.new(half, h + 0.1, 0),
-	trimColor,
-	Enum.Material.Metal
-)
+	-- Hinge marker (visual)
+	local hinge = Instance.new("Attachment")
+	hinge.Name = "Hinge"
+	hinge.Parent = door
 
--- Corner pillars
-local pillarColor = Color3.fromRGB(58, 62, 72)
-for _, corner in {
-	Vector3.new(-half + 2, 0, -half + 2),
-	Vector3.new(half - 2, 0, -half + 2),
-	Vector3.new(-half + 2, 0, half - 2),
-	Vector3.new(half - 2, 0, half - 2),
-} do
-	makePart(
-		"Pillar",
-		Vector3.new(3, h, 3),
-		CFrame.new(corner.X, h / 2, corner.Z),
-		pillarColor,
-		Enum.Material.Concrete
-	)
+	local promptParent = Instance.new("Part")
+	promptParent.Name = "DoorPrompt_" .. id
+	promptParent.Size = Vector3.new(1, 1, 1)
+	promptParent.Transparency = 1
+	promptParent.Anchored = true
+	promptParent.CanCollide = false
+	promptParent.CanQuery = false
+	promptParent.CFrame = closedCFrame
+	promptParent.Parent = doorsFolder
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "Toggle"
+	prompt.ActionText = "Open"
+	prompt.ObjectText = "Door"
+	prompt.MaxActivationDistance = 8
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = promptParent
+
+	-- Keep prompt near door as it swings (attachment to door is better)
+	prompt.Parent = door
+
+	DoorService.RegisterDoor(id, door, closedCFrame, openCFrame, prompt)
 end
 
 --[[
-	Cover layout — designed, not random.
-	All CanCollide + CanQuery so they block movement AND raycasts.
-	Heights: low walls ~3.5 (peek), crates ~4–5, L-shapes give corners.
-	Lanes kept open along ±X / ±Z corridors and center.
+	For shared walls between rooms: only the lower-index room builds the wall+door,
+	so we don't double thickness. Outer perimeter always built by that room.
 ]]
-local coverFolder = Instance.new("Folder")
-coverFolder.Name = "Cover"
-coverFolder.Parent = folder
+local builtEastDoor: { [string]: boolean } = {} -- "col_row" means door on east of that room built
+local builtSouthDoor: { [string]: boolean } = {}
 
-local wood = Color3.fromRGB(118, 88, 48)
-local woodDark = Color3.fromRGB(90, 68, 40)
-local concreteLow = Color3.fromRGB(95, 98, 108)
-local metalCrate = Color3.fromRGB(80, 88, 98)
+for col = 1, cols do
+	for row = 1, rows do
+		local center = roomCenter(col, row)
+		roomCenters[roomKey(col, row)] = center
 
-local function coverPart(name: string, size: Vector3, cf: CFrame, color: Color3, mat: Enum.Material?)
-	return makePart(name, size, cf, color, mat or Enum.Material.Wood, coverFolder)
+		local roomFolder = Instance.new("Folder")
+		roomFolder.Name = "Room_" .. roomKey(col, row)
+		roomFolder.Parent = roomsFolder
+
+		local colorIdx = ((col - 1) + (row - 1) * cols) % #floorColors + 1
+		local fcol = floorColors[colorIdx]
+
+		-- Floor
+		makePart(
+			"Floor",
+			Vector3.new(roomSize, 1.2, roomSize),
+			CFrame.new(center.X, floorY - 0.6, center.Z),
+			fcol,
+			Enum.Material.Slate,
+			roomFolder
+		)
+
+		-- Thin color plate on top for readability
+		local plate = makePart(
+			"FloorPlate",
+			Vector3.new(roomSize - 1, 0.1, roomSize - 1),
+			CFrame.new(center.X, floorY + 0.05, center.Z),
+			fcol:Lerp(Color3.new(1, 1, 1), 0.08),
+			Enum.Material.Concrete,
+			roomFolder
+		)
+		plate.CanCollide = false
+		plate.CanQuery = false
+
+		-- Ceiling
+		if map.Ceiling then
+			local ceil = makePart(
+				"Ceiling",
+				Vector3.new(roomSize, 1, roomSize),
+				CFrame.new(center.X, floorY + wallH + 0.5, center.Z),
+				Color3.fromRGB(45, 48, 55),
+				Enum.Material.Concrete,
+				roomFolder
+			)
+			ceil.CanQuery = true
+		end
+
+		-- Per-room light
+		local lightAnchor = makePart(
+			"LightAnchor",
+			Vector3.new(1, 0.4, 1),
+			CFrame.new(center.X, floorY + wallH - 1.2, center.Z),
+			Color3.fromRGB(255, 240, 200),
+			Enum.Material.Neon,
+			roomFolder
+		)
+		lightAnchor.CanCollide = false
+		lightAnchor.CanQuery = false
+		lightAnchor.Transparency = 0.35
+		local pl = Instance.new("PointLight")
+		pl.Brightness = 1.6 + ((col + row) % 3) * 0.25
+		pl.Range = roomSize * 0.85
+		pl.Color = Color3.fromRGB(255, 230, 200):Lerp(Color3.fromRGB(180, 200, 255), ((col * 3 + row) % 5) / 5)
+		pl.Parent = lightAnchor
+
+		-- Room label
+		local labelPart = makePart(
+			"Label",
+			Vector3.new(0.2, 0.2, 0.2),
+			CFrame.new(center.X, floorY + 0.2, center.Z),
+			Color3.new(1, 1, 1),
+			Enum.Material.SmoothPlastic,
+			roomFolder
+		)
+		labelPart.CanCollide = false
+		labelPart.CanQuery = false
+		labelPart.Transparency = 1
+		local bill = Instance.new("BillboardGui")
+		bill.Size = UDim2.fromOffset(120, 24)
+		bill.StudsOffset = Vector3.new(0, 3, 0)
+		bill.AlwaysOnTop = false
+		bill.Parent = labelPart
+		local lab = Instance.new("TextLabel")
+		lab.Size = UDim2.fromScale(1, 1)
+		lab.BackgroundTransparency = 1
+		lab.Text = if col == map.StartCol and row == map.StartRow
+			then "START"
+			else string.format("R%d-%d", col, row)
+		lab.TextColor3 = Color3.fromRGB(220, 220, 230)
+		lab.TextStrokeTransparency = 0.5
+		lab.Font = Enum.Font.GothamBold
+		lab.TextScaled = true
+		lab.Parent = bill
+
+		local half = roomSize / 2
+		-- Edges: N (-Z), S (+Z), W (-X), E (+X)
+		local hasNorthNeighbor = row > 1
+		local hasSouthNeighbor = row < rows
+		local hasWestNeighbor = col > 1
+		local hasEastNeighbor = col < cols
+
+		-- Outer walls always solid (no door). Shared walls: door toward neighbor,
+		-- built only by the "owner" room (west room owns east wall, north room owns south wall).
+		-- North wall
+		do
+			local edge = Vector3.new(center.X, floorY, center.Z - half)
+			if hasNorthNeighbor then
+				-- southern room of the pair is `row`; north neighbor owns the shared wall — skip
+				-- actually: room above (row-1) owns south wall. So we skip north wall when neighbor exists.
+			else
+				wallSegmentsWithDoor(roomFolder, "WallN", edge, Vector3.xAxis, -Vector3.zAxis, roomSize, false)
+			end
+		end
+
+		-- West wall
+		do
+			local edge = Vector3.new(center.X - half, floorY, center.Z)
+			if not hasWestNeighbor then
+				wallSegmentsWithDoor(roomFolder, "WallW", edge, Vector3.zAxis, -Vector3.xAxis, roomSize, false)
+			end
+		end
+
+		-- East wall (owner of shared wall with east neighbor)
+		do
+			local edge = Vector3.new(center.X + half, floorY, center.Z)
+			local key = roomKey(col, row)
+			if hasEastNeighbor then
+				wallSegmentsWithDoor(roomFolder, "WallE", edge, Vector3.zAxis, Vector3.xAxis, roomSize, true)
+				-- Door in opening — hinge on +Z side of doorway, swings +yaw open into this room
+				doorIdCounter += 1
+				local id = string.format("E_%s", key)
+				local hingePos = Vector3.new(center.X + half, floorY + doorH / 2, center.Z + doorW / 2 - 0.15)
+				-- Door fills opening; thickness along X
+				local size = Vector3.new(map.DoorThickness, doorH, doorW - 0.2)
+				local closed = CFrame.new(hingePos) * CFrame.new(0, 0, -(doorW - 0.2) / 2)
+				-- Open: rotate around hinge (+Y) into west room (-X side) ~95 deg
+				local openAngle = math.rad(map.DoorOpenAngleDegrees)
+				local open = CFrame.new(hingePos) * CFrame.Angles(0, openAngle, 0) * CFrame.new(0, 0, -(doorW - 0.2) / 2)
+				createDoor(id, CFrame.new(hingePos), closed, open, size)
+				builtEastDoor[key] = true
+
+				-- Prompt-friendly doorframe trim
+				makePart(
+					"DoorTrimE",
+					Vector3.new(wallT + 0.4, 0.4, doorW + 0.6),
+					CFrame.new(center.X + half, floorY + doorH + 0.2, center.Z),
+					trimColor,
+					Enum.Material.Metal,
+					roomFolder
+				)
+			else
+				wallSegmentsWithDoor(roomFolder, "WallE", edge, Vector3.zAxis, Vector3.xAxis, roomSize, false)
+			end
+		end
+
+		-- South wall (owner of shared wall with south neighbor)
+		do
+			local edge = Vector3.new(center.X, floorY, center.Z + half)
+			local key = roomKey(col, row)
+			if hasSouthNeighbor then
+				wallSegmentsWithDoor(roomFolder, "WallS", edge, Vector3.xAxis, Vector3.zAxis, roomSize, true)
+				doorIdCounter += 1
+				local id = string.format("S_%s", key)
+				local hingePos = Vector3.new(center.X + doorW / 2 - 0.15, floorY + doorH / 2, center.Z + half)
+				local size = Vector3.new(doorW - 0.2, doorH, map.DoorThickness)
+				local closed = CFrame.new(hingePos) * CFrame.new(-(doorW - 0.2) / 2, 0, 0)
+				local openAngle = math.rad(map.DoorOpenAngleDegrees)
+				local open = CFrame.new(hingePos) * CFrame.Angles(0, openAngle, 0) * CFrame.new(-(doorW - 0.2) / 2, 0, 0)
+				createDoor(id, CFrame.new(hingePos), closed, open, size)
+				builtSouthDoor[key] = true
+
+				makePart(
+					"DoorTrimS",
+					Vector3.new(doorW + 0.6, 0.4, wallT + 0.4),
+					CFrame.new(center.X, floorY + doorH + 0.2, center.Z + half),
+					trimColor,
+					Enum.Material.Metal,
+					roomFolder
+				)
+			else
+				wallSegmentsWithDoor(roomFolder, "WallS", edge, Vector3.xAxis, Vector3.zAxis, roomSize, false)
+			end
+		end
+	end
 end
 
-local function placeCrate(name: string, x: number, z: number, size: Vector3, yaw: number?)
-	local y = floorY + size.Y / 2
-	return coverPart(name, size, CFrame.new(x, y, z) * CFrame.Angles(0, yaw or 0, 0), wood, Enum.Material.Wood)
+-- Corner pillars at each room corner (shared visually ok)
+for col = 1, cols + 1 do
+	for row = 1, rows + 1 do
+		local x = (col - 1) * pitch - roomSize / 2
+		local z = (row - 1) * pitch - roomSize / 2
+		makePart(
+			"Pillar",
+			Vector3.new(wallT + 0.8, wallH, wallT + 0.8),
+			CFrame.new(x, floorY + wallH / 2, z),
+			Color3.fromRGB(60, 64, 74),
+			Enum.Material.Concrete,
+			folder
+		)
+	end
 end
 
-local function placeLowWall(name: string, x: number, z: number, length: number, yaw: number)
-	local height = 3.4
-	local thickness = 1.6
-	local y = floorY + height / 2
-	return coverPart(
-		name,
-		Vector3.new(length, height, thickness),
-		CFrame.new(x, y, z) * CFrame.Angles(0, yaw, 0),
-		concreteLow,
-		Enum.Material.Concrete
+-- Half-walls (waist-high, jump over) and crawl gaps
+local halfWallH = 2.8 -- waist-ish; jumpable
+local crawlOpenH = 3.0 -- opening height at floor for slide/duck
+
+local function placeHalfWalls(col: number, row: number)
+	local c = roomCenter(col, row)
+	-- Two waist-high barriers forming a partial lane
+	makePart(
+		"HalfWall_A",
+		Vector3.new(10, halfWallH, 1.4),
+		CFrame.new(c.X - 4, floorY + halfWallH / 2, c.Z - 5),
+		halfWallColor,
+		Enum.Material.Concrete,
+		coverFolder
+	)
+	makePart(
+		"HalfWall_B",
+		Vector3.new(1.4, halfWallH, 10),
+		CFrame.new(c.X + 6, floorY + halfWallH / 2, c.Z + 2),
+		halfWallColor,
+		Enum.Material.Concrete,
+		coverFolder
+	)
+	-- Low crate
+	makePart(
+		"Crate",
+		Vector3.new(4, 2.5, 4),
+		CFrame.new(c.X - 7, floorY + 1.25, c.Z + 7),
+		Color3.fromRGB(118, 88, 48),
+		Enum.Material.Wood,
+		coverFolder
 	)
 end
 
-local function placeLCover(name: string, x: number, z: number, yaw: number)
-	-- Two segments forming an L; opens toward center when yaw=0
-	local hgt = 4.2
-	local long = 8
-	local short = 5
-	local thick = 1.8
-	local y = floorY + hgt / 2
-	local base = CFrame.new(x, y, z) * CFrame.Angles(0, yaw, 0)
-	coverPart(name .. "_A", Vector3.new(long, hgt, thick), base, woodDark, Enum.Material.Wood)
-	coverPart(
-		name .. "_B",
-		Vector3.new(thick, hgt, short),
-		base * CFrame.new(long / 2 - thick / 2, 0, short / 2 - thick / 2),
-		woodDark,
-		Enum.Material.Wood
+local function placeCrawlGap(col: number, row: number)
+	local c = roomCenter(col, row)
+	-- Barrier with a ~3 stud high floor opening in the middle (two side pillars + top beam)
+	local barrierZ = c.Z + 3
+	local totalW = 14
+	local gapW = 5
+	local sideW = (totalW - gapW) / 2
+	local topH = 4
+	-- Left / right full-height-ish low walls with gap
+	makePart(
+		"CrawlSideL",
+		Vector3.new(sideW, halfWallH + 1.5, 1.5),
+		CFrame.new(c.X - gapW / 2 - sideW / 2, floorY + (halfWallH + 1.5) / 2, barrierZ),
+		crawlColor,
+		Enum.Material.Concrete,
+		coverFolder
 	)
+	makePart(
+		"CrawlSideR",
+		Vector3.new(sideW, halfWallH + 1.5, 1.5),
+		CFrame.new(c.X + gapW / 2 + sideW / 2, floorY + (halfWallH + 1.5) / 2, barrierZ),
+		crawlColor,
+		Enum.Material.Concrete,
+		coverFolder
+	)
+	-- Top beam leaves crawlOpenH clearance at floor
+	makePart(
+		"CrawlBeam",
+		Vector3.new(gapW, topH, 1.5),
+		CFrame.new(c.X, floorY + crawlOpenH + topH / 2, barrierZ),
+		crawlColor,
+		Enum.Material.Concrete,
+		coverFolder
+	)
+	-- Second half-wall elsewhere in room
+	makePart(
+		"HalfWall_CrawlRoom",
+		Vector3.new(8, halfWallH, 1.3),
+		CFrame.new(c.X + 2, floorY + halfWallH / 2, c.Z - 8),
+		halfWallColor,
+		Enum.Material.Concrete,
+		coverFolder
+	)
+
+	-- Slide/crawl trigger: briefly lowers HipHeight so players fit under ~3-stud opening
+	local trigger = makePart(
+		"CrawlTrigger",
+		Vector3.new(gapW - 0.5, crawlOpenH - 0.2, 4),
+		CFrame.new(c.X, floorY + (crawlOpenH - 0.2) / 2, barrierZ),
+		Color3.fromRGB(80, 120, 180),
+		Enum.Material.ForceField,
+		coverFolder
+	)
+	trigger.CanCollide = false
+	trigger.CanQuery = false
+	trigger.Transparency = 0.85
+	trigger.Touched:Connect(function(hit)
+		local model = hit:FindFirstAncestorOfClass("Model")
+		if not model then
+			return
+		end
+		local hum = model:FindFirstChildOfClass("Humanoid")
+		if not hum or hum.Health <= 0 then
+			return
+		end
+		if hum:GetAttribute("CQCSliding") then
+			return
+		end
+		hum:SetAttribute("CQCSliding", true)
+		local prevHip = hum.HipHeight
+		local prevSpeed = hum.WalkSpeed
+		hum.HipHeight = math.min(prevHip, 0.5)
+		hum.WalkSpeed = prevSpeed + 6
+		task.delay(0.85, function()
+			if hum.Parent then
+				hum.HipHeight = prevHip
+				hum.WalkSpeed = prevSpeed
+				hum:SetAttribute("CQCSliding", nil)
+			end
+		end)
+	end)
 end
 
--- 1–4: corner-ish L covers (facing inward), leave mid lanes
-placeLCover("L_NE", 28, -28, math.rad(180))
-placeLCover("L_NW", -28, -28, math.rad(-90))
-placeLCover("L_SE", 28, 28, math.rad(90))
-placeLCover("L_SW", -28, 28, 0)
+for _, pair in map.HalfWallRooms do
+	placeHalfWalls(pair[1], pair[2])
+end
+for _, pair in map.CrawlGapRooms do
+	placeCrawlGap(pair[1], pair[2])
+end
 
--- 5–8: low walls forming mid-field peek spots (not a full barrier)
-placeLowWall("LowWall_N", 0, -18, 14, 0)
-placeLowWall("LowWall_S", 0, 18, 14, 0)
-placeLowWall("LowWall_W", -18, 0, 12, math.rad(90))
-placeLowWall("LowWall_E", 18, 0, 12, math.rad(90))
-
--- 9–11: crate clusters (stacked visual via two sizes)
-placeCrate("Crate_A1", 12, -8, Vector3.new(5, 4.5, 5), math.rad(15))
-placeCrate("Crate_B1", -14, 10, Vector3.new(6, 5, 4.5), math.rad(40))
-placeCrate("Crate_D1", 22, 10, Vector3.new(5, 3.8, 5), math.rad(-30))
-
--- Extra metal box near center-east for variety (12th piece)
-coverPart(
-	"MetalBox_CenterE",
-	Vector3.new(4, 3.2, 7),
-	CFrame.new(8, floorY + 1.6, 6) * CFrame.Angles(0, math.rad(25), 0),
-	metalCrate,
-	Enum.Material.Metal
-)
-
--- Center stays relatively open for CQC; small decorative plate only
-makePart(
-	"CenterMark",
-	Vector3.new(8, 0.12, 8),
-	CFrame.new(0, floorY + 0.1, 0),
-	Color3.fromRGB(70, 90, 110),
-	Enum.Material.Neon
-).CanCollide = false
-
--- Spawn pads + SpawnLocations (on floor, not floating)
-local spawnFolder = Instance.new("Folder")
-spawnFolder.Name = "SpawnPoints"
-spawnFolder.Parent = folder
-
+-- Spawn in start room
+local startCenter = roomCenter(map.StartCol, map.StartRow)
 local spawnOffsets = {
-	Vector3.new(-half + 12, 0, -half + 12),
-	Vector3.new(half - 12, 0, -half + 12),
-	Vector3.new(-half + 12, 0, half - 12),
-	Vector3.new(half - 12, 0, half - 12),
-	Vector3.new(0, 0, -half + 14), -- mid-north
+	Vector3.new(-6, 0, -6),
+	Vector3.new(6, 0, -6),
+	Vector3.new(-6, 0, 6),
+	Vector3.new(0, 0, 0),
 }
 
 for i, offset in spawnOffsets do
+	local pos = startCenter + offset
 	local padY = floorY + 0.25
 	local pad = makePart(
 		"SpawnPad" .. i,
-		Vector3.new(7, 0.35, 7),
-		CFrame.new(offset.X, padY, offset.Z),
+		Vector3.new(6, 0.35, 6),
+		CFrame.new(pos.X, padY, pos.Z),
 		Color3.fromRGB(35, 130, 85),
 		Enum.Material.Neon,
 		spawnFolder
 	)
 	pad.CanCollide = true
 
-	-- Thin ring trim
-	makePart(
-		"SpawnRing" .. i,
-		Vector3.new(8.2, 0.15, 8.2),
-		CFrame.new(offset.X, padY - 0.1, offset.Z),
-		Color3.fromRGB(30, 90, 60),
-		Enum.Material.SmoothPlastic,
-		spawnFolder
-	)
-
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "Spawn" .. i
-	spawn.Size = Vector3.new(6, 1, 6)
-	-- Top of pad: FloorY + pad height/2 + spawn half ≈ FloorY + 0.25 + 0.175 + 0.5
-	spawn.CFrame = CFrame.new(offset.X, floorY + 1.1, offset.Z)
+	spawn.Size = Vector3.new(5, 1, 5)
+	spawn.CFrame = CFrame.new(pos.X, floorY + 1.1, pos.Z)
 	spawn.Anchored = true
 	spawn.CanCollide = true
 	spawn.Duration = 0
@@ -309,15 +612,37 @@ for i, offset in spawnOffsets do
 	spawn.Parent = spawnFolder
 end
 
--- Soft fill light on floor (backup if Lighting is dark)
-local fill = Instance.new("PointLight")
-fill.Name = "ArenaFill"
-fill.Brightness = 0.35
-fill.Range = 80
-fill.Color = Color3.fromRGB(220, 225, 240)
-local floorPart = folder:FindFirstChild("Floor")
-if floorPart then
-	fill.Parent = floorPart
+-- Publish room centers for NPC placement (attribute on folder)
+folder:SetAttribute("StartRoomX", startCenter.X)
+folder:SetAttribute("StartRoomZ", startCenter.Z)
+folder:SetAttribute("RoomPitch", pitch)
+
+-- NPC-friendly world positions (room centers for (3,1), (1,3), (2,2) center — Main uses Config offsets)
+-- Update Config-compatible centers via a ModuleScript value folder
+local npcMarks = Instance.new("Folder")
+npcMarks.Name = "NPCSpawnMarks"
+npcMarks.Parent = folder
+local npcRooms = {
+	{ 3, 1 },
+	{ 1, 3 },
+	{ 3, 3 },
+}
+for i, pair in npcRooms do
+	local c = roomCenter(pair[1], pair[2])
+	local mark = Instance.new("Part")
+	mark.Name = "NPCMark" .. i
+	mark.Anchored = true
+	mark.CanCollide = false
+	mark.CanQuery = false
+	mark.Transparency = 1
+	mark.Size = Vector3.new(1, 1, 1)
+	mark.Position = Vector3.new(c.X, floorY + Config.Arena.SpawnHeight, c.Z)
+	mark.Parent = npcMarks
 end
 
-print("[CQCArena] World setup complete — cover + spawns + lighting.")
+print(string.format(
+	"[CQCArena] Room complex ready — %dx%d rooms, %d doors, half-walls + crawl gaps.",
+	cols,
+	rows,
+	doorIdCounter
+))
