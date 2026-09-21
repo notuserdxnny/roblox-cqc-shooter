@@ -1,8 +1,8 @@
 --!strict
 --[[
-	Creates Shotgun / SMG / Pistol tools and grants them after hub StartMatch.
-	Does not give weapons on join — Hub → StartMatch → GiveLoadout.
-	On CharacterAdded while in-match, re-grants the full loadout.
+	Creates Shotgun / SMG / Pistol tools (and Knife for OITC) and grants loadouts after StartMatch.
+	Casual: all three guns. OITC: Pistol only + Knife; ammo starts at Config.OITC.StartingAmmo.
+	On CharacterAdded while in-match, re-grants the mode-appropriate loadout (OITC resets to 1 bullet).
 ]]
 
 local Players = game:GetService("Players")
@@ -14,6 +14,15 @@ local CombatService = require(script.Parent:WaitForChild("CombatService"))
 local WeaponService = {}
 
 local templates: { [string]: Tool } = {}
+local knifeTemplate: Tool? = nil
+local GameModeService: any = nil
+
+local function getGameMode()
+	if not GameModeService then
+		GameModeService = require(script.Parent:WaitForChild("GameModeService"))
+	end
+	return GameModeService
+end
 
 local function createWeaponTool(def: Config.WeaponDef): Tool
 	local tool = Instance.new("Tool")
@@ -40,7 +49,6 @@ local function createWeaponTool(def: Config.WeaponDef): Tool
 	tip.Material = Enum.Material.Neon
 	tip.CanCollide = false
 	tip.Massless = true
-	-- Align BEFORE weld — critical to avoid character teleport on equip
 	local muzzleZ = -def.HandleSize.Z * 0.45
 	tip.CFrame = handle.CFrame * CFrame.new(0, 0, muzzleZ)
 	tip.Parent = tool
@@ -57,6 +65,43 @@ local function createWeaponTool(def: Config.WeaponDef): Tool
 	light.Color = Color3.fromRGB(255, 200, 120)
 	light.Enabled = false
 	light.Parent = tip
+
+	return tool
+end
+
+local function createKnifeTool(): Tool
+	local tool = Instance.new("Tool")
+	tool.Name = Config.OITC.MeleeToolName
+	tool.RequiresHandle = true
+	tool.CanBeDropped = false
+	tool.ManualActivationOnly = false
+	tool.ToolTip = Config.Melee.ToolTip
+	tool:SetAttribute("WeaponId", "Melee")
+	tool:SetAttribute("IsMelee", true)
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Config.Melee.HandleSize
+	handle.Color = Config.Melee.HandleColor
+	handle.Material = Enum.Material.Metal
+	handle.CanCollide = false
+	handle.Massless = true
+	handle.Parent = tool
+
+	local tip = Instance.new("Part")
+	tip.Name = "Blade"
+	tip.Size = Vector3.new(0.18, 0.08, 0.7)
+	tip.Color = Config.Melee.TipColor
+	tip.Material = Enum.Material.Neon
+	tip.CanCollide = false
+	tip.Massless = true
+	tip.CFrame = handle.CFrame * CFrame.new(0, 0, -Config.Melee.HandleSize.Z * 0.55)
+	tip.Parent = tool
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = handle
+	weld.Part1 = tip
+	weld.Parent = tip
 
 	return tool
 end
@@ -80,13 +125,29 @@ local function getTemplate(weaponId: string): Tool
 	return tool
 end
 
+local function getKnifeTemplate(): Tool
+	if knifeTemplate and knifeTemplate.Parent then
+		return knifeTemplate
+	end
+	local folder = ReplicatedStorage:FindFirstChild("WeaponTemplates")
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "WeaponTemplates"
+		folder.Parent = ReplicatedStorage
+	end
+	local tool = createKnifeTool()
+	tool.Parent = folder
+	knifeTemplate = tool
+	return tool
+end
+
 local function stripWeapons(player: Player)
 	local function strip(container: Instance?)
 		if not container then
 			return
 		end
 		for _, child in container:GetChildren() do
-			if Config.IsWeaponTool(child) then
+			if Config.IsWeaponTool(child) or Config.IsMeleeTool(child) then
 				child:Destroy()
 			end
 		end
@@ -95,13 +156,28 @@ local function stripWeapons(player: Player)
 	strip(player.Character)
 end
 
-function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?)
+function WeaponService.StripAll(player: Player)
+	stripWeapons(player)
+end
+
+function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?, mode: string?)
+	local resolvedMode = mode or getGameMode().GetMode(player) or Config.DefaultMode
+	if resolvedMode ~= Config.Modes.OITC and resolvedMode ~= Config.Modes.Casual then
+		resolvedMode = Config.DefaultMode
+	end
+
 	local preferred = preferredWeaponId or Config.DefaultWeaponId
-	if not Config.GetWeapon(preferred) then
+	if resolvedMode == Config.Modes.OITC then
+		preferred = Config.OITC.WeaponId
+	elseif not Config.GetWeapon(preferred) then
 		preferred = Config.DefaultWeaponId
 	end
 
-	CombatService.SetInMatch(player, true, preferred)
+	CombatService.SetMode(player, resolvedMode)
+	CombatService.SetInMatch(player, true, preferred, resolvedMode)
+	getGameMode().SetMode(player, resolvedMode)
+
+	-- Reset ammo for mode (OITC → StartingAmmo on pistol)
 	CombatService.ResetAmmo(player, nil)
 
 	local function grant()
@@ -114,15 +190,24 @@ function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?)
 		stripWeapons(player)
 
 		local preferredTool: Tool? = nil
-		for _, id in Config.WeaponOrder do
-			local tool = getTemplate(id):Clone()
-			tool.Parent = backpack or character
-			if id == preferred then
-				preferredTool = tool
+
+		if resolvedMode == Config.Modes.OITC then
+			local pistol = getTemplate(Config.OITC.WeaponId):Clone()
+			pistol.Parent = backpack or character
+			preferredTool = pistol
+
+			local knife = getKnifeTemplate():Clone()
+			knife.Parent = backpack or character
+		else
+			for _, id in Config.WeaponOrder do
+				local tool = getTemplate(id):Clone()
+				tool.Parent = backpack or character
+				if id == preferred then
+					preferredTool = tool
+				end
 			end
 		end
 
-		-- Equip preferred starter
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if humanoid and preferredTool then
 			task.defer(function()
@@ -132,7 +217,7 @@ function WeaponService.GiveLoadout(player: Player, preferredWeaponId: string?)
 			end)
 		end
 
-		CombatService.NotifyMatchStarted(player, preferred)
+		CombatService.NotifyMatchStarted(player, preferred, resolvedMode)
 	end
 
 	if player.Character then
@@ -144,6 +229,7 @@ function WeaponService.Init()
 	for _, id in Config.WeaponOrder do
 		getTemplate(id)
 	end
+	getKnifeTemplate()
 
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	if not remotes then
@@ -166,6 +252,9 @@ function WeaponService.Init()
 	local fire = ensureRemote(Config.Remotes.FireWeapon)
 	local startMatch = ensureRemote(Config.Remotes.StartMatch)
 	ensureRemote(Config.Remotes.MatchStarted)
+	ensureRemote(Config.Remotes.MatchEnded)
+	ensureRemote(Config.Remotes.ReturnToHub)
+	ensureRemote(Config.Remotes.MeleeAttack)
 
 	fire.OnServerEvent:Connect(function(player, a)
 		if a == "reload" then
@@ -177,23 +266,34 @@ function WeaponService.Init()
 
 	startMatch.OnServerEvent:Connect(function(player, payload)
 		local weaponId = Config.DefaultWeaponId
+		local mode = Config.DefaultMode
 		if typeof(payload) == "string" and Config.GetWeapon(payload) then
 			weaponId = payload
-		elseif typeof(payload) == "table" and typeof(payload.weaponId) == "string" and Config.GetWeapon(payload.weaponId) then
-			weaponId = payload.weaponId
+		elseif typeof(payload) == "table" then
+			if typeof(payload.weaponId) == "string" and Config.GetWeapon(payload.weaponId) then
+				weaponId = payload.weaponId
+			end
+			if typeof(payload.mode) == "string" then
+				mode = getGameMode().NormalizeMode(payload.mode)
+			end
 		end
-		WeaponService.GiveLoadout(player, weaponId)
+		getGameMode().StartMatch(player, mode, weaponId)
 	end)
 
 	local function hookPlayer(player: Player)
 		player.CharacterAdded:Connect(function()
-			if CombatService.IsInMatch(player) then
+			if CombatService.IsInMatch(player) and not getGameMode().IsMatchOver(player) then
 				local preferred = player:GetAttribute("CQCPreferredWeapon")
 				if typeof(preferred) ~= "string" then
 					preferred = Config.DefaultWeaponId
 				end
+				local mode = player:GetAttribute("CQCMode")
+				if typeof(mode) ~= "string" then
+					mode = getGameMode().GetMode(player)
+				end
 				task.spawn(function()
-					WeaponService.GiveLoadout(player, preferred :: string)
+					-- OITC classic: respawn with starting ammo again
+					WeaponService.GiveLoadout(player, preferred :: string, mode :: string)
 				end)
 			end
 		end)
