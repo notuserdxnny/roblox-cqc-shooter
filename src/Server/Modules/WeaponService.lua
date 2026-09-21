@@ -3,6 +3,9 @@
 	Creates and grants the CQC Tool to players on spawn.
 	Firing input is handled by Client/WeaponController.client.lua.
 	Muzzle part includes a PointLight slot for client flash FX.
+
+	Weld order: set CFrame BEFORE creating WeldConstraint so equipping
+	never yanks HumanoidRootPart (classic teleport-on-equip/fire bug).
 ]]
 
 local Players = game:GetService("Players")
@@ -37,15 +40,15 @@ local function createWeaponTool(): Tool
 	tip.Material = Enum.Material.Neon
 	tip.CanCollide = false
 	tip.Massless = true
+	-- Align BEFORE weld — critical to avoid character teleport on equip
+	tip.CFrame = handle.CFrame * CFrame.new(0, 0, -1.2)
 	tip.Parent = tool
 
 	local weld = Instance.new("WeldConstraint")
 	weld.Part0 = handle
 	weld.Part1 = tip
 	weld.Parent = tip
-	tip.CFrame = handle.CFrame * CFrame.new(0, 0, -1.2)
 
-	-- Pre-create light (client enables briefly on fire)
 	local light = Instance.new("PointLight")
 	light.Name = "MuzzleLight"
 	light.Brightness = 0
@@ -116,7 +119,6 @@ function WeaponService.Init()
 		fire.Parent = remotes
 	end
 
-	-- Reload requests (string "reload") — CombatService ignores non-Vector3 origins
 	fire.OnServerEvent:Connect(function(player, a)
 		if a == "reload" then
 			CombatService.StartReload(player)

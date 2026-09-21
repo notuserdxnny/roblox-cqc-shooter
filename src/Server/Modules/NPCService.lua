@@ -2,7 +2,8 @@
 --[[
 	Spawns simple wandering training dummies for solo playtesting.
 	Compact welded body (root + torso + head) so they stay upright.
-	Placed at Config.NPC.SpawnOffsets (sensible cover-adjacent spots).
+	Placed at Config.NPC.SpawnOffsets (room centers from WorldSetup marks).
+	Wander stays near each dummy's spawn room.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,6 +28,7 @@ local function ensureFolder(): Folder
 end
 
 local function weld(a: BasePart, b: BasePart)
+	-- Align b to intended pose before welding is caller's job; here parts already posed
 	local w = Instance.new("WeldConstraint")
 	w.Part0 = a
 	w.Part1 = b
@@ -108,6 +110,9 @@ local function createDummy(name: string, position: Vector3): Model
 	label.TextScaled = true
 	label.Parent = billboard
 
+	model:SetAttribute("HomeX", position.X)
+	model:SetAttribute("HomeZ", position.Z)
+
 	return model
 end
 
@@ -116,12 +121,15 @@ local function nextSpawnPosition(): Vector3
 	if offsets and #offsets > 0 then
 		spawnIndex = (spawnIndex % #offsets) + 1
 		local off = offsets[spawnIndex]
-		-- Slight jitter so respawns don't stack perfectly
-		local jitter = Vector3.new((math.random() - 0.5) * 4, 0, (math.random() - 0.5) * 4)
+		local jitter = Vector3.new((math.random() - 0.5) * 3, 0, (math.random() - 0.5) * 3)
+		-- Offsets may be absolute world XZ (from WorldSetup marks) or relative to arenaCenter
+		if math.abs(off.X) > 5 or math.abs(off.Z) > 5 then
+			return Vector3.new(off.X, arenaCenter.Y, off.Z) + jitter
+		end
 		return arenaCenter + Vector3.new(off.X, 0, off.Z) + jitter
 	end
 	local angle = math.random() * math.pi * 2
-	local dist = 10 + math.random() * 12
+	local dist = 4 + math.random() * 6
 	return arenaCenter + Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
 end
 
@@ -131,11 +139,15 @@ local function wanderLoop(model: Model)
 		return
 	end
 
+	local homeX = model:GetAttribute("HomeX") :: number? or arenaCenter.X
+	local homeZ = model:GetAttribute("HomeZ") :: number? or arenaCenter.Z
+	local home = Vector3.new(homeX, arenaCenter.Y, homeZ)
+
 	task.spawn(function()
 		while model.Parent and humanoid.Parent and humanoid.Health > 0 do
 			local angle = math.random() * math.pi * 2
 			local radius = math.random() * Config.NPC.WanderRadius
-			local target = arenaCenter + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+			local target = home + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
 			humanoid:MoveTo(target)
 			task.wait(Config.NPC.WanderInterval + math.random() * 1.5)
 		end
