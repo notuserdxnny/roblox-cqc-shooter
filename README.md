@@ -1,6 +1,6 @@
 # Roblox CQC Shooter
 
-Short-range **first-person** room shooter for **Roblox Studio** / **Rojo**. Open a **hub**, pick a **game mode** (**Casual** or **One in the Chamber**), then spawn into a **grid of connected square rooms** with directional doors, half-wall cover, and crawl gaps. Server-authoritative raycast damage, kill scoring, training dummies, and polished gun feel (camera-only recoil, muzzle flash, tracers, hitmarkers, sounds).
+Short-range **first-person** room shooter for **Roblox Studio** / **Rojo**. You begin in a dedicated **Lobby** (not the combat map). Open the **hub UI**, pick a **game mode** (**Casual** or **One in the Chamber**), then **Start** to teleport into the **grid of connected square rooms** with directional doors, half-wall cover, and crawl gaps. Server-authoritative raycast damage, kill scoring, training dummies, and polished gun feel (camera-only recoil, muzzle flash, tracers, hitmarkers, sounds).
 
 No free Robux, no exploits, no aimbot — just a clean Luau starter.
 
@@ -21,7 +21,7 @@ Classic CoD-style rules:
 | Loadout | **Pistol only** + **Knife** (no Shotgun / SMG) |
 | Starting ammo | **1 bullet** (magazine display = 1, reserve 0) |
 | On kill | **+1 bullet** (gun *or* melee kill) |
-| Empty ammo | **Melee only** — short-range server raycast / Knife |
+| Empty ammo | **Melee** — LMB with empty mag *or* Knife equipped → server melee raycast |
 | Win | First to `Config.OITC.KillsToWin` (**default 5**) → winner UI → optional **Back to Hub** |
 | Death / respawn | Still in-match; ammo resets to **1 bullet** again |
 | Reload | **Disabled** — bullets only from kills or spawn |
@@ -33,9 +33,10 @@ Hub flow: select **One in the Chamber** → **START** (gun pick is skipped / loc
 
 | Piece | Role |
 |--------|------|
-| `Hub.client.lua` | Lobby: mode select (Casual / OITC), Casual loadout, Start, winner → hub |
+| `Hub.client.lua` | Polished hub UI: mode cards, Casual loadout, START, winner overlay |
 | `GameModeService` | Mode tracking, OITC score / win, return to hub |
-| `WorldSetup.server.lua` | **3×3 room complex**: floors, lights, walls, doorways, doors, half-walls, crawl gaps, spawns |
+| `LobbyService` | Lobby freeze / teleport to combat on Start / return to Lobby |
+| `WorldSetup.server.lua` | **3×3 combat grid** + separate **Lobby** room; combat teleport pads |
 | `DoorService` | Server door tween; **opens away from the triggering player** |
 | `CombatService` | Fire + **melee** validation, OITC ammo awards on kill, `FireResult` juice |
 | `WeaponService` | Casual = three guns; OITC = Pistol + Knife; grants after Start |
@@ -59,6 +60,7 @@ roblox-cqc-shooter/
         CombatService.lua
         WeaponService.lua
         GameModeService.lua
+        LobbyService.lua
         NPCService.lua
         DoorService.lua
     Client/
@@ -73,7 +75,7 @@ Rojo mapping (`default.project.json`):
 - `src/Shared` → `ReplicatedStorage.Shared`
 - `src/Server` → `ServerScriptService.Server`
 - `src/Client` → `StarterPlayer.StarterPlayerScripts.Client`
-- StarterPlayer: `CameraMode = LockFirstPerson`, zoom 0.5 / 0.5 (hub temporarily uses Classic for UI clicks)
+- StarterPlayer: `CameraMode = Classic`, zoom 8–20 (match forces LockFirstPerson after Start)
 - Remotes under `ReplicatedStorage.Remotes` (created at runtime if missing)
 
 ## Setup with Rojo (recommended)
@@ -97,7 +99,7 @@ You should see the **hub**, pick **Casual** or **One in the Chamber**, press **S
    - `ReplicatedStorage.Shared`
    - `ServerScriptService.Server` + `Server.Modules`
    - `StarterPlayer.StarterPlayerScripts.Client`
-2. Set StarterPlayer `CameraMode = LockFirstPerson`, Min/Max zoom `0.5`.
+2. Set StarterPlayer `CameraMode = Classic`, Min/Max zoom `8` / `20` (match locks FP after Start).
 3. Copy ModuleScripts:
    - `Config.lua` → `ReplicatedStorage.Shared.Config`
    - `CombatService.lua`, `WeaponService.lua`, `GameModeService.lua`, `NPCService.lua`, `DoorService.lua` → `Server.Modules`
@@ -115,7 +117,7 @@ You should see the **hub**, pick **Casual** or **One in the Chamber**, press **S
 
 ### Casual
 
-1. **Play Solo** — hub appears (Classic camera so you can click UI).
+1. **Play Solo** — you spawn in the **Lobby** room; hub UI appears (Classic camera, free mouse).
 2. Mode **Casual** → select **Shotgun**, **SMG**, or **Pistol** → **START**.
 3. Camera locks **first person**; all three guns on the hotbar.
 4. **Hold Left Mouse** to fire; **R** to reload; **1–3** to switch.
@@ -160,19 +162,34 @@ Tune under `Config.Weapons` / `Config.OITC` in `src/Shared/Config.lua`.
 - **Doors**: wood parts on hinges; **ProximityPrompt** → `DoorService` tweens CFrame **away from the player**.
 - **Half-walls**: ~2.8 studs tall — jump over for CQC peek cover.
 - **Crawl gaps**: side pillars + overhead beam + ForceField slide trigger.
-- **Spawn** pads only in the START room (grid 1,1). NPCs marked in other rooms.
+- **Lobby** SpawnLocation is the only join spawn. Combat **START** room (grid 1,1) has teleport pads used on StartMatch. NPCs marked in other rooms.
 
-## First-person / hub note
+## Lobby vs match flow
 
-- While **hub** is open (`CQCInHub`), camera is **Classic** so buttons are clickable; HUD is hidden.
-- After **Start**, `FirstPerson.client.lua` forces `LockFirstPerson` and zoom `0.5`.
-- After an OITC win, winner UI appears; **Back to Hub** (or auto after `WinnerRestartSeconds`) restores the lobby.
+| Phase | Where you are | Camera / mouse | Tools | Movement |
+|-------|---------------|----------------|-------|----------|
+| **Lobby** (before Start) | Dedicated **Lobby** room (`WorldSetup` → `CQCArena.Lobby`), far from the combat grid | **Classic**, mouse **unlocked** for UI | None | Frozen (`WalkSpeed` / jump 0) |
+| **Match** (after Start) | Teleported to combat **START** pads | **LockFirstPerson**, mouse locked | Mode loadout | Normal |
+| **Return to hub** | Strip tools → teleport back to Lobby → freeze | Classic again | None | Frozen |
+
+- Hub UI sets `CQCInHub`; server sets `CQCInMatch` on Start / clears it on return.
+- `FirstPerson.client.lua` **must not** force LockFirstPerson while hub/lobby is active — it gates on `CQCInHub` / `CQCInMatch`.
+- StarterPlayer defaults to **Classic** zoom 8–20; match camera is applied only after Start.
+- Only the Lobby has a Roblox `SpawnLocation`. Combat pads are teleport targets only (NPCs stay on the combat grid, unreachable from lobby).
+- After an OITC win, winner UI appears; **Back to Lobby** (or auto after `WinnerRestartSeconds`) restores the hub.
 
 ## Teleport-on-shoot fix
 
 **Root cause:** `WeldConstraint` before aligning muzzle / flash CFrames yanked the Tool Handle.
 
 **Fix:** set part `CFrame` **before** `WeldConstraint`; recoil is **camera-only** via `BindToRenderStep` at `Camera+1`.
+
+
+## Knife / OITC melee fix
+
+**Root cause:** `CombatService.HandleMelee` bailed whenever pistol ammo was `> 0`, so an equipped **Knife** still did nothing after a kill refill. Empty-mag `FireWeapon` also returned without routing to melee (client had to fire a separate `MeleeAttack` remote). Server never listened to Knife `Tool.Activated`.
+
+**Fix:** melee allowed when **Knife is equipped OR ammo is 0**; empty OITC LMB routes to `HandleMelee`; Knife `Tool.Activated` is bound on the server; client also treats MouseButton1 as a fire/melee backup.
 
 ## Config knobs (`src/Shared/Config.lua`)
 
@@ -217,7 +234,7 @@ Tune under `Config.Weapons` / `Config.OITC` in `src/Shared/Config.lua`.
 
 ## Design notes
 
-- **Hub gate**: no tools until `StartMatch`; combat ignores fire while not in-match.
+- **Lobby gate**: spawn in Lobby (separate space); no tools / frozen until `StartMatch`; combat ignores fire while not in-match.
 - **Mode gate**: `GameModeService` owns Casual vs OITC; `CombatService` applies ammo / melee / win hooks.
 - **Server authority**: origin + look validated; equipped Tool selects weapon stats; melee is a separate short raycast.
 - **Directional doors**: hinge + leaf offset; open away from the player.
