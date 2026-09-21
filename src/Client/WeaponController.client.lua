@@ -74,6 +74,45 @@ local markArms = {
 	makeMarkArm(-45, Color3.fromRGB(255, 255, 255)),
 }
 
+-- Damage taken flash
+local damageFlash = Instance.new("Frame")
+damageFlash.Name = "DamageFlash"
+damageFlash.Size = UDim2.fromScale(1, 1)
+damageFlash.BackgroundColor3 = Color3.fromRGB(180, 20, 30)
+damageFlash.BackgroundTransparency = 1
+damageFlash.BorderSizePixel = 0
+damageFlash.ZIndex = 50
+damageFlash.Parent = fxGui
+
+local function flashDamage()
+	local t = feel.DamageFlashTransparency or 0.72
+	damageFlash.BackgroundTransparency = t
+	task.spawn(function()
+		local t0 = os.clock()
+		local dur = feel.DamageFlashSeconds or 0.18
+		while true do
+			local a = (os.clock() - t0) / dur
+			if a >= 1 then
+				damageFlash.BackgroundTransparency = 1
+				break
+			end
+			damageFlash.BackgroundTransparency = t + (1 - t) * a
+			task.wait()
+		end
+	end)
+end
+
+local function hitColors(): (Color3, Color3)
+	local id = player:GetAttribute("CQCHitmarker")
+	if typeof(id) == "string" then
+		local item = Config.GetShopItem(id)
+		if item then
+			return item.HitColor or Color3.fromRGB(255, 255, 255), item.HitHeadColor or Color3.fromRGB(255, 70, 70)
+		end
+	end
+	return Color3.fromRGB(255, 255, 255), Color3.fromRGB(255, 70, 70)
+end
+
 local function isOurTool(tool: Instance?): boolean
 	return Config.IsWeaponTool(tool) or Config.IsMeleeTool(tool)
 end
@@ -332,12 +371,13 @@ local function spawnTracer(fromPos: Vector3, toPos: Vector3, damaged: boolean)
 end
 
 local function showHitMarker(headshot: boolean)
-	local color = if headshot then Color3.fromRGB(255, 70, 70) else Color3.fromRGB(255, 255, 255)
+	local body, head = hitColors()
+	local color = if headshot then head else body
 	for _, arm in markArms do
 		arm.BackgroundColor3 = color
 	end
 	hitMarker.Visible = true
-	hitMarker.Size = UDim2.fromOffset(if headshot then 34 else 26, if headshot then 34 else 26)
+	hitMarker.Size = UDim2.fromOffset(if headshot then 38 else 28, if headshot then 38 else 28)
 	local dur = if headshot then feel.HeadshotMarkerSeconds else feel.HitMarkerSeconds
 	task.delay(dur, function()
 		hitMarker.Visible = false
@@ -418,6 +458,7 @@ local function onFireResult(payload: any)
 
 	if kind == "melee" then
 		local parent: Instance = (tool and getMuzzlePart(tool)) or (char and char:FindFirstChild("HumanoidRootPart")) or fxGui
+		playSoundAt(parent, soundIds.KnifeWhoosh or soundIds.Empty, volumes.KnifeWhoosh or 0.35, 0.9 + math.random() * 0.15)
 		playSoundAt(parent, soundIds.Melee or soundIds.HitConfirm, volumes.Melee or volumes.HitConfirm, 1.1)
 		if typeof(payload.ammo) == "number" then
 			clientAmmo = payload.ammo
@@ -501,6 +542,23 @@ local function onFireResult(payload: any)
 		end
 	end
 end
+
+
+local lastHp = 100
+local function watchDamage(character: Model)
+	local humanoid = character:WaitForChild("Humanoid") :: Humanoid
+	lastHp = humanoid.Health
+	humanoid.HealthChanged:Connect(function(hp)
+		if hp < lastHp - 0.5 then
+			flashDamage()
+		end
+		lastHp = hp
+	end)
+end
+if player.Character then
+	task.spawn(watchDamage, player.Character)
+end
+player.CharacterAdded:Connect(watchDamage)
 
 fireResultRemote.OnClientEvent:Connect(onFireResult)
 
