@@ -154,6 +154,10 @@ Config.Feel = {
 	},
 }
 
+--[[
+	Sound catalog (document IDs here — replace with your own uploads if needed).
+	Countdown / stingers / match loop used by Hub.client.lua.
+]]
 Config.SoundIds = {
 	Fire = "rbxassetid://9114224527",
 	FireAlt = "rbxassetid://9114226351",
@@ -162,8 +166,15 @@ Config.SoundIds = {
 	HitConfirm = "rbxassetid://9114221327",
 	Headshot = "rbxassetid://9114222212",
 	Melee = "rbxassetid://9114221327",
-	RoundStart = "rbxassetid://9113824583",
-	CountdownTick = "rbxassetid://9113895097",
+	-- Announcer / round flow
+	CountdownTick = "rbxassetid://9113895097", -- punchy beep (playback speed varies 3→1)
+	Countdown3 = "rbxassetid://9113895097", -- optional distinct; falls back to CountdownTick
+	Countdown2 = "rbxassetid://9113895097",
+	Countdown1 = "rbxassetid://9113895097",
+	CountdownGo = "rbxassetid://9113824583", -- GO! sting
+	RoundStart = "rbxassetid://9113824583", -- alias / match start sting
+	MatchLoop = "rbxassetid://1848354536", -- quiet looping bed during match
+	WinSting = "rbxassetid://5852410825", -- victory sting on MatchEnded
 }
 
 Config.SoundVolumes = {
@@ -175,7 +186,13 @@ Config.SoundVolumes = {
 	Headshot = 0.7,
 	Melee = 0.6,
 	RoundStart = 0.55,
-	CountdownTick = 0.35,
+	CountdownTick = 0.4,
+	Countdown3 = 0.45,
+	Countdown2 = 0.5,
+	Countdown1 = 0.55,
+	CountdownGo = 0.65,
+	MatchLoop = 0.18, -- keep quiet under gunfire
+	WinSting = 0.6,
 }
 
 Config.Arena = {
@@ -222,17 +239,33 @@ Config.Lighting = {
 	GeographicLatitude = 25,
 }
 
+--[[
+	Combat bots (replaces passive Training Dummies).
+	OITC-style: 1 bullet, server raycast gun, melee when close, refill on kill.
+]]
 Config.NPC = {
-	Count = 3,
-	WalkSpeed = 6,
-	WanderRadius = 10,
-	WanderInterval = 3.5,
+	Count = 4,
+	Name = "Bot",
+	WalkSpeed = 14,
 	MaxHealth = 100,
-	Name = "Training Dummy",
+	StartingAmmo = 1,
+	AcquireRange = 72,
+	FireRange = 55,
+	MeleeRange = 8,
+	GunDamage = 100, -- OITC one-shot
+	MeleeDamage = 100,
+	FireCooldown = 0.85,
+	MeleeCooldown = 0.55,
+	PathInterval = 2.2,
+	WanderInterval = 3.5,
+	EmptyAmmoRegenSeconds = 8, -- if they miss forever, slowly re-arm
+	RespawnDelay = 5,
+	RefillAmmoOnKill = true,
 	SpawnOffsets = {
 		Vector3.new(60, 0, 0),
 		Vector3.new(0, 0, 60),
 		Vector3.new(60, 0, 60),
+		Vector3.new(30, 0, 30),
 	},
 }
 
@@ -291,9 +324,14 @@ Config.Match = {
 	EndFreezeSeconds = 1.25,
 	-- Auto return to hub if player ignores end-screen buttons
 	WinnerRestartSeconds = 20,
-	-- Optional round-start sting (played client-side on GO). Empty / invalid = silent.
+	-- Round-start sting on GO (Hub prefers SoundIds.CountdownGo / RoundStart)
 	RoundStartSoundId = "rbxassetid://9113824583",
 	RoundStartSoundVolume = 0.55,
+	-- Match bed music (Hub starts on MatchStarted, stops on MatchEnded / Hub)
+	MatchLoopSoundId = "rbxassetid://1848354536",
+	MatchLoopVolume = 0.18,
+	WinStingSoundId = "rbxassetid://5852410825",
+	WinStingVolume = 0.6,
 }
 
 --[[
@@ -622,7 +660,10 @@ Config.SoundVolumes.Melee = 0.55
 Config.SoundVolumes.KnifeWhoosh = 0.35
 Config.SoundVolumes.Door = 0.28
 Config.SoundVolumes.RoundStart = 0.5
-Config.SoundVolumes.CountdownTick = 0.3
+Config.SoundVolumes.CountdownTick = 0.35
+Config.SoundVolumes.CountdownGo = 0.65
+Config.SoundVolumes.MatchLoop = 0.18
+Config.SoundVolumes.WinSting = 0.6
 
 -- Match lighting / post (gentle, keep CQC readable)
 Config.Lighting.Post = {
