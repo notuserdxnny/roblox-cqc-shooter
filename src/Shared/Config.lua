@@ -89,11 +89,11 @@ Config.Weapons = {
 	} :: WeaponDef,
 }
 
--- Hotbar / hub order
+-- Weapon catalog order (Shotgun/SMG kept for later; OITC only grants Pistol)
 Config.WeaponOrder = { "Shotgun", "SMG", "Pistol" }
 
--- Default starting weapon when hub starts the match
-Config.DefaultWeaponId = "SMG"
+-- Active match weapon (OITC-only for now)
+Config.DefaultWeaponId = "Pistol"
 
 function Config.GetWeapon(id: string): WeaponDef?
 	return Config.Weapons[id]
@@ -116,8 +116,8 @@ function Config.IsMeleeTool(tool: Instance?): boolean
 	return tool ~= nil and tool:IsA("Tool") and tool.Name == "Knife"
 end
 
--- Legacy single-weapon alias (SMG) for any leftover reads
-Config.Weapon = Config.Weapons.SMG
+-- Legacy single-weapon alias (Pistol / OITC) for leftover reads
+Config.Weapon = Config.Weapons.Pistol
 
 -- Combat validation
 Config.Combat = {
@@ -162,6 +162,8 @@ Config.SoundIds = {
 	HitConfirm = "rbxassetid://9114221327",
 	Headshot = "rbxassetid://9114222212",
 	Melee = "rbxassetid://9114221327",
+	RoundStart = "rbxassetid://9113824583",
+	CountdownTick = "rbxassetid://9113895097",
 }
 
 Config.SoundVolumes = {
@@ -172,6 +174,8 @@ Config.SoundVolumes = {
 	HitConfirm = 0.55,
 	Headshot = 0.7,
 	Melee = 0.6,
+	RoundStart = 0.55,
+	CountdownTick = 0.35,
 }
 
 Config.Arena = {
@@ -237,7 +241,7 @@ Config.HUD = {
 }
 
 Config.Camera = {
-	-- Applied only after StartMatch / while CQCInMatch
+	-- Applied after countdown GO / while CQCInMatch (not during hub or end overlay)
 	LockFirstPerson = true,
 	MinZoom = 0.5,
 	MaxZoom = 0.5,
@@ -249,11 +253,10 @@ Config.Camera = {
 }
 
 Config.Hub = {
-	Title = "CQC ROOM SHOOTER",
-	Subtitle = "Select a mode, then press Start to leave the Lobby.",
-	HowTo = "Hold LMB to fire · R reload (Casual) · Hotbar switch · Doors open away from you · Jump half-walls · Slide crawl gaps",
+	Title = "ONE IN THE CHAMBER",
+	Subtitle = "Pistol · 1 bullet · Knife when empty — Start for countdown, then fight.",
+	HowTo = "Pistol only · 1 bullet · Kill = +1 ammo · Empty = Knife melee · First to KillsToWin wins · Respawn resets to 1 bullet · Doors · Jump half-walls · Slide crawl gaps",
 	HowToOITC = "Pistol only · 1 bullet · Kill = +1 ammo · Empty = Knife melee · First to KillsToWin wins · Respawn resets to 1 bullet",
-	ModeCasualBlurb = "Full loadout. Shotgun, SMG, and Pistol on your hotbar. Reload freely and train on dummies.",
 	ModeOITCBlurb = "One bullet. One pistol. Knife when empty. First to the kill goal wins.",
 }
 
@@ -279,15 +282,29 @@ Config.Lobby = {
 }
 
 --[[
-	Game modes. Casual = current three-gun freeplay.
+	Match start countdown (OITC).
+	After hub Start: teleport frozen → 3…2…1…GO! → unfreeze + weapons + InMatch.
+]]
+Config.Match = {
+	CountdownSeconds = 3,
+	GoDisplaySeconds = 0.85,
+	EndFreezeSeconds = 1.25,
+	-- Auto return to hub if player ignores end-screen buttons
+	WinnerRestartSeconds = 20,
+	-- Optional round-start sting (played client-side on GO). Empty / invalid = silent.
+	RoundStartSoundId = "rbxassetid://9113824583",
+	RoundStartSoundVolume = 0.55,
+}
+
+--[[
+	Game is OITC-only for now. Modes table kept for attribute / remote payloads.
 	One in the Chamber = pistol + 1 bullet, kill awards ammo, melee when empty.
 ]]
 Config.Modes = {
-	Casual = "Casual",
 	OITC = "OITC",
 }
 
-Config.DefaultMode = "Casual"
+Config.DefaultMode = "OITC"
 
 --[[
 	One in the Chamber rules (classic).
@@ -305,7 +322,8 @@ Config.OITC = {
 	MeleeDamage = 100,
 	MeleeCooldown = 0.5,
 	MeleeToolName = "Knife",
-	WinnerRestartSeconds = 6,
+	-- Prefer Config.Match.WinnerRestartSeconds; kept as fallback alias
+	WinnerRestartSeconds = 20,
 }
 
 Config.Melee = {
@@ -323,9 +341,10 @@ Config.Remotes = {
 	KillFeed = "KillFeed",
 	StatsUpdate = "StatsUpdate",
 	ToggleDoor = "ToggleDoor",
-	StartMatch = "StartMatch", -- C→S { weaponId, mode }
-	MatchStarted = "MatchStarted", -- S→C { weaponId, mode, inMatch }
-	MatchEnded = "MatchEnded", -- S→C { winnerName, mode, kills }
+	StartMatch = "StartMatch", -- C→S { } begin OITC match (also Play Again)
+	MatchCountdown = "MatchCountdown", -- S→C { seconds, mode, weaponId } begin 3…2…1
+	MatchStarted = "MatchStarted", -- S→C { weaponId, mode, inMatch } after GO — combat live
+	MatchEnded = "MatchEnded", -- S→C { winnerName, mode, kills, youWin, durationSec }
 	ReturnToHub = "ReturnToHub", -- C→S request hub / S→C force hub
 	MeleeAttack = "MeleeAttack", -- C→S origin + look (OITC empty ammo)
 }
