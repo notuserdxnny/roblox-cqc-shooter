@@ -94,10 +94,11 @@ local function shouldMelee(): boolean
 	if not inOITC() then
 		return false
 	end
-	if meleeReady or clientAmmo <= 0 then
+	-- Knife equipped → always melee (even if ammo somehow > 0)
+	if equippedTool and isMeleeTool(equippedTool) then
 		return true
 	end
-	if equippedTool and isMeleeTool(equippedTool) then
+	if meleeReady or clientAmmo <= 0 then
 		return true
 	end
 	return false
@@ -625,6 +626,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
 	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		-- Backup path: Tool.Activated can miss under Classic→LockFirstPerson transitions.
+		-- Also makes empty-ammo melee / knife LMB reliable.
+		if player:GetAttribute("CQCInHub") == true or player:GetAttribute("CQCInMatch") ~= true then
+			return
+		end
+		holding = true
+		tryFire()
+		return
+	end
 	if input.KeyCode == Enum.KeyCode.R then
 		if inOITC() then
 			return -- no reload in OITC
@@ -633,6 +644,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			return
 		end
 		fireRemote:FireServer("reload")
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, _gameProcessed)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		holding = false
 	end
 end)
 
