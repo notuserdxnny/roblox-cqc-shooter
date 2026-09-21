@@ -1,6 +1,7 @@
 --!strict
 --[[
-	Simple HUD: health, ammo, kills, kill feed, crosshair.
+	Simple HUD: health, ammo, weapon name, kills, kill feed, crosshair.
+	Hidden while hub is open (CQCInHub).
 ]]
 
 local Players = game:GetService("Players")
@@ -21,6 +22,7 @@ gui.Name = "CQCHud"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 10
 gui.Parent = playerGui
 
 -- Crosshair
@@ -55,7 +57,7 @@ local panel = Instance.new("Frame")
 panel.Name = "StatsPanel"
 panel.AnchorPoint = Vector2.new(0, 1)
 panel.Position = UDim2.new(0, 24, 1, -24)
-panel.Size = UDim2.fromOffset(260, 110)
+panel.Size = UDim2.fromOffset(280, 130)
 panel.BackgroundColor3 = Color3.fromRGB(20, 22, 28)
 panel.BackgroundTransparency = 0.25
 panel.BorderSizePixel = 0
@@ -67,8 +69,8 @@ panelCorner.Parent = panel
 local healthLabel = Instance.new("TextLabel")
 healthLabel.Name = "Health"
 healthLabel.BackgroundTransparency = 1
-healthLabel.Position = UDim2.fromOffset(14, 10)
-healthLabel.Size = UDim2.new(1, -28, 0, 28)
+healthLabel.Position = UDim2.fromOffset(14, 8)
+healthLabel.Size = UDim2.new(1, -28, 0, 24)
 healthLabel.Font = Enum.Font.GothamBold
 healthLabel.TextSize = 20
 healthLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -76,22 +78,34 @@ healthLabel.TextColor3 = Color3.fromRGB(120, 255, 160)
 healthLabel.Text = "HP 100"
 healthLabel.Parent = panel
 
+local weaponLabel = Instance.new("TextLabel")
+weaponLabel.Name = "Weapon"
+weaponLabel.BackgroundTransparency = 1
+weaponLabel.Position = UDim2.fromOffset(14, 34)
+weaponLabel.Size = UDim2.new(1, -28, 0, 22)
+weaponLabel.Font = Enum.Font.GothamBold
+weaponLabel.TextSize = 16
+weaponLabel.TextXAlignment = Enum.TextXAlignment.Left
+weaponLabel.TextColor3 = Color3.fromRGB(160, 200, 255)
+weaponLabel.Text = "WEAPON —"
+weaponLabel.Parent = panel
+
 local ammoLabel = Instance.new("TextLabel")
 ammoLabel.Name = "Ammo"
 ammoLabel.BackgroundTransparency = 1
-ammoLabel.Position = UDim2.fromOffset(14, 42)
+ammoLabel.Position = UDim2.fromOffset(14, 58)
 ammoLabel.Size = UDim2.new(1, -28, 0, 28)
 ammoLabel.Font = Enum.Font.GothamBold
 ammoLabel.TextSize = 20
 ammoLabel.TextXAlignment = Enum.TextXAlignment.Left
 ammoLabel.TextColor3 = Color3.fromRGB(255, 220, 120)
-ammoLabel.Text = string.format("AMMO %d / %d", Config.Weapon.MagazineSize, Config.Weapon.MagazineSize)
+ammoLabel.Text = "AMMO — / —"
 ammoLabel.Parent = panel
 
 local killsLabel = Instance.new("TextLabel")
 killsLabel.Name = "Kills"
 killsLabel.BackgroundTransparency = 1
-killsLabel.Position = UDim2.fromOffset(14, 72)
+killsLabel.Position = UDim2.fromOffset(14, 90)
 killsLabel.Size = UDim2.new(1, -28, 0, 28)
 killsLabel.Font = Enum.Font.GothamBold
 killsLabel.TextSize = 18
@@ -100,21 +114,19 @@ killsLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
 killsLabel.Text = "KILLS 0"
 killsLabel.Parent = panel
 
--- Hint
 local hint = Instance.new("TextLabel")
 hint.Name = "Hint"
 hint.AnchorPoint = Vector2.new(0.5, 0)
 hint.Position = UDim2.new(0.5, 0, 0, 18)
-hint.Size = UDim2.fromOffset(520, 28)
+hint.Size = UDim2.fromOffset(640, 28)
 hint.BackgroundTransparency = 1
 hint.Font = Enum.Font.Gotham
-hint.TextSize = 16
+hint.TextSize = 15
 hint.TextColor3 = Color3.fromRGB(230, 230, 240)
 hint.TextStrokeTransparency = 0.5
-hint.Text = "FPS lock-on · CQC Blaster · Hold LMB · R reload · Doors: ProximityPrompt · Jump half-walls / slide crawl gaps"
+hint.Text = "Shotgun · SMG · Pistol · Hold LMB · R reload · Doors swing away from you · Jump half-walls / slide crawl gaps"
 hint.Parent = gui
 
--- Kill feed
 local feed = Instance.new("Frame")
 feed.Name = "KillFeed"
 feed.AnchorPoint = Vector2.new(1, 0)
@@ -127,10 +139,11 @@ feedLayout.SortOrder = Enum.SortOrder.LayoutOrder
 feedLayout.Padding = UDim.new(0, 4)
 feedLayout.Parent = feed
 
-local ammo = Config.Weapon.MagazineSize
-local magSize = Config.Weapon.MagazineSize
+local ammo = 0
+local magSize = 0
 local reloading = false
 local kills = 0
+local weaponName = "—"
 
 local function refreshAmmoText()
 	if reloading then
@@ -138,13 +151,26 @@ local function refreshAmmoText()
 		ammoLabel.TextColor3 = Color3.fromRGB(255, 140, 80)
 	else
 		ammoLabel.Text = string.format("AMMO %d / %d", ammo, magSize)
-		ammoLabel.TextColor3 = if ammo <= 3 then Color3.fromRGB(255, 100, 100) else Color3.fromRGB(255, 220, 120)
+		ammoLabel.TextColor3 = if ammo <= 3 and magSize > 0
+			then Color3.fromRGB(255, 100, 100)
+			else Color3.fromRGB(255, 220, 120)
 	end
+end
+
+local function refreshWeapon()
+	weaponLabel.Text = string.format("WEAPON %s", weaponName)
 end
 
 local function refreshKills()
 	killsLabel.Text = string.format("KILLS %d", kills)
 end
+
+local function syncHudVisible()
+	local hide = player:GetAttribute("CQCInHub") == true
+	gui.Enabled = not hide
+end
+syncHudVisible()
+player:GetAttributeChangedSignal("CQCInHub"):Connect(syncHudVisible)
 
 local function bindHumanoid(humanoid: Humanoid)
 	local function update()
@@ -175,10 +201,14 @@ end
 player.CharacterAdded:Connect(onCharacter)
 
 local ammoRemote = remotes:WaitForChild(Config.Remotes.AmmoUpdate) :: RemoteEvent
-ammoRemote.OnClientEvent:Connect(function(current, max, isReloading)
+ammoRemote.OnClientEvent:Connect(function(current, max, isReloading, _weaponId, wName)
 	ammo = current
 	magSize = max
 	reloading = isReloading == true
+	if typeof(wName) == "string" and wName ~= "" then
+		weaponName = wName
+		refreshWeapon()
+	end
 	refreshAmmoText()
 end)
 
@@ -199,6 +229,10 @@ statsRemote.OnClientEvent:Connect(function(stats)
 	end
 	if stats.reloading ~= nil then
 		reloading = stats.reloading
+	end
+	if typeof(stats.weaponName) == "string" and stats.weaponName ~= "" then
+		weaponName = stats.weaponName
+		refreshWeapon()
 	end
 	refreshAmmoText()
 end)
@@ -221,4 +255,5 @@ killFeedRemote.OnClientEvent:Connect(function(killer, victim)
 end)
 
 refreshAmmoText()
+refreshWeapon()
 refreshKills()

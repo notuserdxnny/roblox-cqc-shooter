@@ -70,7 +70,21 @@ local markArms = {
 }
 
 local function isOurTool(tool: Instance?): boolean
-	return tool ~= nil and tool:IsA("Tool") and tool.Name == Config.Weapon.Name
+	return Config.IsWeaponTool(tool)
+end
+
+local function currentWeaponId(): string?
+	if equippedTool then
+		local id = equippedTool:GetAttribute("WeaponId")
+		if typeof(id) == "string" then
+			return id
+		end
+		local def = Config.GetWeaponByToolName(equippedTool.Name)
+		if def then
+			return def.Id
+		end
+	end
+	return nil
 end
 
 local function getLook(): (Vector3, Vector3)
@@ -170,7 +184,7 @@ local recoilYaw = 0
 local activeFovKick = 0
 local baseFov: number? = nil
 
-local function punchRecoil()
+local function punchRecoil(weaponId: string?)
 	local cam = workspace.CurrentCamera
 	if not cam then
 		return
@@ -179,11 +193,19 @@ local function punchRecoil()
 		baseFov = cam.FieldOfView
 	end
 
-	local pitch = math.rad(feel.RecoilPitchDegrees * (0.75 + math.random() * 0.5))
-	local yaw = math.rad(feel.RecoilYawDegrees * (math.random() * 2 - 1))
+	local mult = 1
+	if weaponId and feel.RecoilByWeapon then
+		local m = feel.RecoilByWeapon[weaponId]
+		if typeof(m) == "number" then
+			mult = m
+		end
+	end
+
+	local pitch = math.rad(feel.RecoilPitchDegrees * mult * (0.75 + math.random() * 0.5))
+	local yaw = math.rad(feel.RecoilYawDegrees * mult * (math.random() * 2 - 1))
 	recoilPitch += pitch
 	recoilYaw += yaw
-	activeFovKick = feel.FovKick
+	activeFovKick = feel.FovKick * math.clamp(mult, 0.6, 2.2)
 	cam.FieldOfView = (baseFov :: number) + activeFovKick
 end
 
@@ -343,7 +365,15 @@ local function onFireResult(payload: any)
 	end
 	local kind = payload.kind
 	local char = player.Character
-	local tool = equippedTool or (char and char:FindFirstChild(Config.Weapon.Name) :: Tool?)
+	local tool: Tool? = equippedTool
+	if not tool and char then
+		for _, child in char:GetChildren() do
+			if Config.IsWeaponTool(child) then
+				tool = child :: Tool
+				break
+			end
+		end
+	end
 
 	if kind == "empty" then
 		local parent: Instance = (tool and getMuzzlePart(tool)) or (char and char:FindFirstChild("HumanoidRootPart")) or fxGui
@@ -365,7 +395,8 @@ local function onFireResult(payload: any)
 		return
 	end
 
-	punchRecoil()
+	local wid = if typeof(payload.weaponId) == "string" then payload.weaponId else currentWeaponId()
+	punchRecoil(wid)
 	if tool then
 		flashMuzzle(tool)
 		local muzzle = getMuzzlePart(tool)
@@ -416,8 +447,16 @@ local function tryFire()
 	if not equippedTool then
 		return
 	end
+	if player:GetAttribute("CQCInHub") == true then
+		return
+	end
+	if player:GetAttribute("CQCInMatch") ~= true then
+		return
+	end
+	local def = Config.GetWeaponByToolName(equippedTool.Name)
+	local cooldown = if def then def.FireCooldown else 0.2
 	local now = os.clock()
-	if now - lastLocalFire < Config.Weapon.FireCooldown * 0.85 then
+	if now - lastLocalFire < cooldown * 0.85 then
 		return
 	end
 	lastLocalFire = now
@@ -439,6 +478,7 @@ local function bindTool(tool: Tool)
 	end)
 	tool.Equipped:Connect(function()
 		equippedTool = tool
+		fireRemote:FireServer("sync")
 	end)
 	tool.Unequipped:Connect(function()
 		if equippedTool == tool then

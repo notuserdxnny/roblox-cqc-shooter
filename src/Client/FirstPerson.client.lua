@@ -1,7 +1,8 @@
 --!strict
 --[[
-	Force LockFirstPerson for FPS feel. Re-applies on CharacterAdded.
-	Shift-lock left optional/off. Crosshair stays screen-center (HUD).
+	Force LockFirstPerson for FPS feel after hub Start.
+	While CQCInHub, leave Classic camera so the lobby UI is clickable.
+	Re-applies on CharacterAdded / attribute changes.
 ]]
 
 local Players = game:GetService("Players")
@@ -11,13 +12,26 @@ local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local camCfg = Config.Camera
 
-local function applyFirstPerson()
+local function inHub(): boolean
+	return player:GetAttribute("CQCInHub") == true
+end
+
+local function applyCamera()
+	if inHub() then
+		player.CameraMode = Enum.CameraMode.Classic
+		player.CameraMinZoomDistance = 0.5
+		player.CameraMaxZoomDistance = 24
+		pcall(function()
+			player.DevEnableMouseLock = false
+		end)
+		return
+	end
+
 	if camCfg.LockFirstPerson then
 		player.CameraMode = Enum.CameraMode.LockFirstPerson
 	end
 	player.CameraMinZoomDistance = camCfg.MinZoom
 	player.CameraMaxZoomDistance = camCfg.MaxZoom
-	-- Shift-lock optional off
 	pcall(function()
 		player.DevEnableMouseLock = camCfg.EnableMouseLock == true
 	end)
@@ -33,25 +47,30 @@ local function applyFirstPerson()
 	end
 end
 
-applyFirstPerson()
+applyCamera()
 
-player.CharacterAdded:Connect(function()
-	-- Camera can reset briefly on respawn; re-lock next frames
-	applyFirstPerson()
-	task.defer(applyFirstPerson)
-	task.delay(0.1, applyFirstPerson)
-	task.delay(0.5, applyFirstPerson)
+player:GetAttributeChangedSignal("CQCInHub"):Connect(function()
+	applyCamera()
+	task.defer(applyCamera)
 end)
 
--- Periodically reinforce in case something else changes zoom/mode
+player.CharacterAdded:Connect(function()
+	applyCamera()
+	task.defer(applyCamera)
+	task.delay(0.1, applyCamera)
+	task.delay(0.5, applyCamera)
+end)
+
 task.spawn(function()
 	while true do
 		task.wait(2)
-		if player.CameraMode ~= Enum.CameraMode.LockFirstPerson and camCfg.LockFirstPerson then
-			applyFirstPerson()
-		end
-		if player.CameraMaxZoomDistance > camCfg.MaxZoom + 0.01 then
-			applyFirstPerson()
+		if not inHub() then
+			if player.CameraMode ~= Enum.CameraMode.LockFirstPerson and camCfg.LockFirstPerson then
+				applyCamera()
+			end
+			if player.CameraMaxZoomDistance > camCfg.MaxZoom + 0.01 then
+				applyCamera()
+			end
 		end
 	end
 end)
