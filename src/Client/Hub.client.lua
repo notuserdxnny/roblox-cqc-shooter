@@ -1,13 +1,16 @@
 --!strict
 --[[
-	Full-screen professional hub: Play | Shop | Inventory | Settings.
-	IgnoreGuiInset, Scale(1,1) dark overlay. Match countdown + end overlay.
+	Full-bleed game hub (Valorant/Fortnite-lite lobby menu).
+	Opaque root Frame Size(1,1) — zero world visibility.
+	Left sidebar nav + main content region. Shop/Inventory as card grids.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -44,9 +47,41 @@ local equipped: { [string]: string } = {
 	Title = "title_none",
 }
 local statusMsg = ""
+local hubCamConn: RBXScriptConnection? = nil
+
+local SIDEBAR_W = Theme.SidebarWidth or 248
+local CONTENT_PAD = Theme.ContentPad or 40
 
 --------------------------------------------------------------------------
--- Root full-screen GUI
+-- Helpers
+--------------------------------------------------------------------------
+local function corner(parent: Instance, r: number?)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r or Theme.Radius)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent: Instance, color: Color3?, thick: number?, transparency: number?)
+	local s = Instance.new("UIStroke")
+	s.Color = color or Theme.Stroke
+	s.Thickness = thick or 1
+	s.Transparency = transparency or 0.15
+	s.Parent = parent
+	return s
+end
+
+local function clearChildren(frame: Instance)
+	for _, c in frame:GetChildren() do
+		if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") or c:IsA("ScrollingFrame")
+			or c:IsA("UIListLayout") or c:IsA("UIGridLayout") then
+			c:Destroy()
+		end
+	end
+end
+
+--------------------------------------------------------------------------
+-- Root: fully opaque full-bleed ScreenGui
 --------------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "CQCHub"
@@ -56,156 +91,257 @@ gui.DisplayOrder = 100
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
-local dim = Instance.new("Frame")
-dim.Name = "Dim"
-dim.Size = UDim2.fromScale(1, 1)
-dim.BackgroundColor3 = Theme.Overlay
-dim.BackgroundTransparency = 0.08
-dim.BorderSizePixel = 0
-dim.Active = true -- block world clicks
-dim.Parent = gui
+-- Opaque full-bleed root — NOTHING of the 3D world shows through
+local root = Instance.new("Frame")
+root.Name = "Root"
+root.Size = UDim2.fromScale(1, 1)
+root.Position = UDim2.fromScale(0, 0)
+root.BackgroundColor3 = Theme.Bg
+root.BackgroundTransparency = 0 -- fully opaque
+root.BorderSizePixel = 0
+root.Active = true
+root.ZIndex = 1
+root.Parent = gui
 
-local grad = Instance.new("UIGradient")
-grad.Color = ColorSequence.new({
-	ColorSequenceKeypoint.new(0, Color3.fromRGB(8, 12, 22)),
-	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(6, 8, 14)),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 10, 18)),
+local rootGrad = Instance.new("UIGradient")
+rootGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(8, 10, 18)),
+	ColorSequenceKeypoint.new(0.45, Color3.fromRGB(6, 8, 14)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 8, 16)),
 })
-grad.Rotation = 110
-grad.Parent = dim
+rootGrad.Rotation = 125
+rootGrad.Parent = root
 
--- Main shell
-local shell = Instance.new("Frame")
-shell.Name = "Shell"
-shell.Size = UDim2.fromScale(1, 1)
-shell.BackgroundTransparency = 1
-shell.Parent = gui
+--------------------------------------------------------------------------
+-- Left sidebar
+--------------------------------------------------------------------------
+local sidebar = Instance.new("Frame")
+sidebar.Name = "Sidebar"
+sidebar.Size = UDim2.new(0, SIDEBAR_W, 1, 0)
+sidebar.Position = UDim2.fromScale(0, 0)
+sidebar.BackgroundColor3 = Theme.Sidebar
+sidebar.BackgroundTransparency = 0
+sidebar.BorderSizePixel = 0
+sidebar.ZIndex = 2
+sidebar.Parent = root
 
-local pad = Instance.new("UIPadding")
-pad.PaddingTop = UDim.new(0, 16)
-pad.PaddingBottom = UDim.new(0, 16)
-pad.PaddingLeft = UDim.new(0, 24)
-pad.PaddingRight = UDim.new(0, 24)
-pad.Parent = shell
+local sideGrad = Instance.new("UIGradient")
+sideGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(12, 14, 24)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 10, 18)),
+})
+sideGrad.Rotation = 180
+sideGrad.Parent = sidebar
 
--- Top nav
-local nav = Instance.new("Frame")
-nav.Name = "Nav"
-nav.Size = UDim2.new(1, 0, 0, Theme.NavHeight)
-nav.BackgroundColor3 = Theme.Panel
-nav.BorderSizePixel = 0
-nav.Parent = shell
-do
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, Theme.Radius)
-	c.Parent = nav
-	local s = Instance.new("UIStroke")
-	s.Color = Theme.Stroke
-	s.Thickness = 1
-	s.Transparency = 0.2
-	s.Parent = nav
-	local np = Instance.new("UIPadding")
-	np.PaddingLeft = UDim.new(0, 16)
-	np.PaddingRight = UDim.new(0, 16)
-	np.Parent = nav
-end
+-- Right edge accent line on sidebar
+local sideEdge = Instance.new("Frame")
+sideEdge.Name = "Edge"
+sideEdge.AnchorPoint = Vector2.new(1, 0)
+sideEdge.Position = UDim2.new(1, 0, 0, 0)
+sideEdge.Size = UDim2.new(0, 1, 1, 0)
+sideEdge.BackgroundColor3 = Theme.Stroke
+sideEdge.BackgroundTransparency = 0.35
+sideEdge.BorderSizePixel = 0
+sideEdge.ZIndex = 3
+sideEdge.Parent = sidebar
 
-local brand = Instance.new("TextLabel")
-brand.BackgroundTransparency = 1
-brand.Size = UDim2.fromOffset(220, Theme.NavHeight)
-brand.Font = Theme.FontTitle
-brand.TextSize = 16
-brand.TextXAlignment = Enum.TextXAlignment.Left
-brand.TextColor3 = Theme.Text
-brand.Text = "OITC  ·  CQC"
-brand.Parent = nav
+local sidePad = Instance.new("UIPadding")
+sidePad.PaddingTop = UDim.new(0, 28)
+sidePad.PaddingBottom = UDim.new(0, 24)
+sidePad.PaddingLeft = UDim.new(0, 20)
+sidePad.PaddingRight = UDim.new(0, 20)
+sidePad.Parent = sidebar
+
+-- Logo / brand block
+local brandBlock = Instance.new("Frame")
+brandBlock.Name = "Brand"
+brandBlock.Size = UDim2.new(1, 0, 0, 72)
+brandBlock.BackgroundTransparency = 1
+brandBlock.Parent = sidebar
+
+local logoMark = Instance.new("Frame")
+logoMark.Size = UDim2.fromOffset(36, 36)
+logoMark.BackgroundColor3 = Theme.OITC
+logoMark.BorderSizePixel = 0
+logoMark.Parent = brandBlock
+corner(logoMark, 8)
+local logoMarkGrad = Instance.new("UIGradient")
+logoMarkGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 160, 90)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 90, 50)),
+})
+logoMarkGrad.Rotation = 135
+logoMarkGrad.Parent = logoMark
+
+local logoLetter = Instance.new("TextLabel")
+logoLetter.BackgroundTransparency = 1
+logoLetter.Size = UDim2.fromScale(1, 1)
+logoLetter.Font = Theme.FontTitle
+logoLetter.TextSize = 18
+logoLetter.TextColor3 = Color3.fromRGB(255, 255, 255)
+logoLetter.Text = "1"
+logoLetter.Parent = logoMark
+
+local brandTitle = Instance.new("TextLabel")
+brandTitle.BackgroundTransparency = 1
+brandTitle.Position = UDim2.fromOffset(48, 2)
+brandTitle.Size = UDim2.new(1, -48, 0, 20)
+brandTitle.Font = Theme.FontTitle
+brandTitle.TextSize = 15
+brandTitle.TextXAlignment = Enum.TextXAlignment.Left
+brandTitle.TextColor3 = Theme.Text
+brandTitle.Text = "OITC"
+brandTitle.Parent = brandBlock
+
+local brandSub = Instance.new("TextLabel")
+brandSub.BackgroundTransparency = 1
+brandSub.Position = UDim2.fromOffset(48, 22)
+brandSub.Size = UDim2.new(1, -48, 0, 16)
+brandSub.Font = Theme.FontBody
+brandSub.TextSize = 11
+brandSub.TextXAlignment = Enum.TextXAlignment.Left
+brandSub.TextColor3 = Theme.TextDim
+brandSub.Text = "CQC SHOOTER"
+brandSub.Parent = brandBlock
+
+-- Nav buttons container
+local navList = Instance.new("Frame")
+navList.Name = "Nav"
+navList.Position = UDim2.fromOffset(0, 96)
+navList.Size = UDim2.new(1, 0, 1, -180)
+navList.BackgroundTransparency = 1
+navList.Parent = sidebar
+
+local navLayout = Instance.new("UIListLayout")
+navLayout.FillDirection = Enum.FillDirection.Vertical
+navLayout.Padding = UDim.new(0, 6)
+navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+navLayout.Parent = navList
+
+-- Credits at bottom of sidebar
+local creditsPanel = Instance.new("Frame")
+creditsPanel.Name = "CreditsPanel"
+creditsPanel.AnchorPoint = Vector2.new(0, 1)
+creditsPanel.Position = UDim2.new(0, 0, 1, 0)
+creditsPanel.Size = UDim2.new(1, 0, 0, 64)
+creditsPanel.BackgroundColor3 = Theme.SidebarAlt
+creditsPanel.BorderSizePixel = 0
+creditsPanel.Parent = sidebar
+corner(creditsPanel, Theme.RadiusSm)
+stroke(creditsPanel, Theme.StrokeSoft, 1, 0.4)
+
+local creditsLabel = Instance.new("TextLabel")
+creditsLabel.BackgroundTransparency = 1
+creditsLabel.Position = UDim2.fromOffset(14, 10)
+creditsLabel.Size = UDim2.new(1, -28, 0, 14)
+creditsLabel.Font = Theme.FontBody
+creditsLabel.TextSize = 11
+creditsLabel.TextXAlignment = Enum.TextXAlignment.Left
+creditsLabel.TextColor3 = Theme.TextDim
+creditsLabel.Text = "CREDITS"
+creditsLabel.Parent = creditsPanel
 
 local creditsBadge = Instance.new("TextLabel")
 creditsBadge.Name = "Credits"
-creditsBadge.AnchorPoint = Vector2.new(1, 0.5)
-creditsBadge.Position = UDim2.new(1, 0, 0.5, 0)
-creditsBadge.Size = UDim2.fromOffset(150, 32)
-creditsBadge.BackgroundColor3 = Theme.PanelAlt
-creditsBadge.BorderSizePixel = 0
+creditsBadge.BackgroundTransparency = 1
+creditsBadge.Position = UDim2.fromOffset(14, 28)
+creditsBadge.Size = UDim2.new(1, -28, 0, 26)
 creditsBadge.Font = Theme.FontTitle
-creditsBadge.TextSize = 14
+creditsBadge.TextSize = 22
+creditsBadge.TextXAlignment = Enum.TextXAlignment.Left
 creditsBadge.TextColor3 = Theme.Credits
 creditsBadge.Text = "₵ 100"
-creditsBadge.Parent = nav
-do
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, Theme.RadiusXs)
-	c.Parent = creditsBadge
-end
+creditsBadge.Parent = creditsPanel
 
-local tabBar = Instance.new("Frame")
-tabBar.Name = "Tabs"
-tabBar.AnchorPoint = Vector2.new(0.5, 0.5)
-tabBar.Position = UDim2.new(0.5, 0, 0.5, 0)
-tabBar.Size = UDim2.fromOffset(420, 40)
-tabBar.BackgroundTransparency = 1
-tabBar.Parent = nav
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-tabLayout.Padding = UDim.new(0, 8)
-tabLayout.Parent = tabBar
+--------------------------------------------------------------------------
+-- Main content area (fills remaining width/height)
+--------------------------------------------------------------------------
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Position = UDim2.fromOffset(SIDEBAR_W, 0)
+main.Size = UDim2.new(1, -SIDEBAR_W, 1, 0)
+main.BackgroundTransparency = 1
+main.ZIndex = 2
+main.Parent = root
 
-local content = Instance.new("Frame")
-content.Name = "Content"
-content.Position = UDim2.fromOffset(0, Theme.NavHeight + 14)
-content.Size = UDim2.new(1, 0, 1, -(Theme.NavHeight + 14))
-content.BackgroundTransparency = 1
-content.Parent = shell
+local mainPad = Instance.new("UIPadding")
+mainPad.PaddingTop = UDim.new(0, CONTENT_PAD)
+mainPad.PaddingBottom = UDim.new(0, CONTENT_PAD)
+mainPad.PaddingLeft = UDim.new(0, CONTENT_PAD)
+mainPad.PaddingRight = UDim.new(0, CONTENT_PAD)
+mainPad.Parent = main
 
 local pages: { [string]: Frame } = {}
 local tabButtons: { [string]: TextButton } = {}
+local tabIndicators: { [string]: Frame } = {}
 
-local function corner(parent: Instance, r: number?)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, r or Theme.Radius)
-	c.Parent = parent
-	return c
-end
-
-local function stroke(parent: Instance, color: Color3?, thick: number?)
-	local s = Instance.new("UIStroke")
-	s.Color = color or Theme.Stroke
-	s.Thickness = thick or 1
-	s.Transparency = 0.15
-	s.Parent = parent
-	return s
-end
-
-local function makeTab(name: string)
+local function makeNavTab(name: string, order: number, iconText: string)
 	local btn = Instance.new("TextButton")
 	btn.Name = name
-	btn.Size = UDim2.fromOffset(96, 36)
-	btn.BackgroundColor3 = Theme.PanelAlt
+	btn.Size = UDim2.new(1, 0, 0, 44)
+	btn.BackgroundColor3 = Theme.Sidebar
+	btn.BackgroundTransparency = 1
 	btn.BorderSizePixel = 0
 	btn.Font = Theme.FontTitle
 	btn.TextSize = 13
 	btn.TextColor3 = Theme.TextMuted
-	btn.Text = string.upper(name)
+	btn.Text = ""
 	btn.AutoButtonColor = false
-	btn.Parent = tabBar
-	corner(btn, Theme.RadiusXs)
+	btn.LayoutOrder = order
+	btn.Parent = navList
+	corner(btn, Theme.RadiusSm)
+
+	local indicator = Instance.new("Frame")
+	indicator.Name = "Indicator"
+	indicator.Size = UDim2.new(0, 3, 0, 22)
+	indicator.Position = UDim2.new(0, 0, 0.5, -11)
+	indicator.BackgroundColor3 = Theme.Accent
+	indicator.BorderSizePixel = 0
+	indicator.Visible = false
+	indicator.Parent = btn
+	corner(indicator, 2)
+
+	local icon = Instance.new("TextLabel")
+	icon.Name = "Icon"
+	icon.BackgroundTransparency = 1
+	icon.Position = UDim2.fromOffset(16, 0)
+	icon.Size = UDim2.fromOffset(24, 44)
+	icon.Font = Theme.FontTitle
+	icon.TextSize = 14
+	icon.TextColor3 = Theme.TextDim
+	icon.Text = iconText
+	icon.Parent = btn
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.fromOffset(44, 0)
+	label.Size = UDim2.new(1, -52, 1, 0)
+	label.Font = Theme.FontTitle
+	label.TextSize = 13
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = Theme.TextMuted
+	label.Text = string.upper(name)
+	label.Parent = btn
+
 	tabButtons[name] = btn
+	tabIndicators[name] = indicator
 
 	local page = Instance.new("Frame")
 	page.Name = name .. "Page"
 	page.Size = UDim2.fromScale(1, 1)
 	page.BackgroundTransparency = 1
 	page.Visible = false
-	page.Parent = content
+	page.Parent = main
 	pages[name] = page
+
 	return btn, page
 end
 
-local playBtn, playPage = makeTab("Play")
-local shopBtn, shopPage = makeTab("Shop")
-local invBtn, invPage = makeTab("Inventory")
-local setBtn, setPage = makeTab("Settings")
+local playBtn, playPage = makeNavTab("Play", 1, "▸")
+local shopBtn, shopPage = makeNavTab("Shop", 2, "◆")
+local invBtn, invPage = makeNavTab("Inventory", 3, "▣")
+local setBtn, setPage = makeNavTab("Settings", 4, "⚙")
 
 local function setTab(name: string)
 	activeTab = name
@@ -213,12 +349,32 @@ local function setTab(name: string)
 		page.Visible = n == name
 	end
 	for n, btn in tabButtons do
+		local label = btn:FindFirstChild("Label") :: TextLabel?
+		local icon = btn:FindFirstChild("Icon") :: TextLabel?
+		local ind = tabIndicators[n]
 		if n == name then
-			btn.BackgroundColor3 = Theme.Accent
-			btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		else
+			btn.BackgroundTransparency = 0
 			btn.BackgroundColor3 = Theme.PanelAlt
-			btn.TextColor3 = Theme.TextMuted
+			if label then
+				label.TextColor3 = Theme.Text
+			end
+			if icon then
+				icon.TextColor3 = Theme.AccentGlow
+			end
+			if ind then
+				ind.Visible = true
+			end
+		else
+			btn.BackgroundTransparency = 1
+			if label then
+				label.TextColor3 = Theme.TextMuted
+			end
+			if icon then
+				icon.TextColor3 = Theme.TextDim
+			end
+			if ind then
+				ind.Visible = false
+			end
 		end
 	end
 	if name == "Shop" or name == "Inventory" then
@@ -232,12 +388,13 @@ for name, btn in tabButtons do
 	end)
 	btn.MouseEnter:Connect(function()
 		if activeTab ~= name then
-			btn.BackgroundColor3 = Theme.CardHover
+			btn.BackgroundTransparency = 0
+			btn.BackgroundColor3 = Color3.fromRGB(16, 20, 32)
 		end
 	end)
 	btn.MouseLeave:Connect(function()
 		if activeTab ~= name then
-			btn.BackgroundColor3 = Theme.PanelAlt
+			btn.BackgroundTransparency = 1
 		end
 	end)
 end
@@ -247,90 +404,106 @@ local function refreshCreditsLabel()
 end
 
 --------------------------------------------------------------------------
--- PLAY PAGE
+-- PLAY PAGE — hero + wide rules + bottom CTA bar
 --------------------------------------------------------------------------
-local playCard = Instance.new("Frame")
-playCard.AnchorPoint = Vector2.new(0.5, 0.5)
-playCard.Position = UDim2.fromScale(0.5, 0.5)
-playCard.Size = UDim2.new(0, 640, 0, 480)
-playCard.BackgroundColor3 = Theme.Panel
-playCard.BorderSizePixel = 0
-playCard.Parent = playPage
-corner(playCard)
-stroke(playCard)
-do
-	local p = Instance.new("UIPadding")
-	p.PaddingTop = UDim.new(0, 28)
-	p.PaddingBottom = UDim.new(0, 24)
-	p.PaddingLeft = UDim.new(0, 32)
-	p.PaddingRight = UDim.new(0, 32)
-	p.Parent = playCard
-end
+local playHero = Instance.new("Frame")
+playHero.Name = "Hero"
+playHero.Size = UDim2.new(1, 0, 0, 120)
+playHero.BackgroundTransparency = 1
+playHero.Parent = playPage
 
-local badge = Instance.new("Frame")
-badge.Size = UDim2.fromOffset(120, 22)
-badge.BackgroundColor3 = Theme.OITC
-badge.BorderSizePixel = 0
-badge.Parent = playCard
-corner(badge, 6)
-local badgeText = Instance.new("TextLabel")
-badgeText.BackgroundTransparency = 1
-badgeText.Size = UDim2.fromScale(1, 1)
-badgeText.Font = Theme.FontTitle
-badgeText.TextSize = 11
-badgeText.TextColor3 = Color3.fromRGB(255, 255, 255)
-badgeText.Text = "OITC ONLY"
-badgeText.Parent = badge
+local oitcBadge = Instance.new("Frame")
+oitcBadge.Size = UDim2.fromOffset(110, 24)
+oitcBadge.BackgroundColor3 = Theme.OITC
+oitcBadge.BorderSizePixel = 0
+oitcBadge.Parent = playHero
+corner(oitcBadge, 6)
+local oitcBadgeGrad = Instance.new("UIGradient")
+oitcBadgeGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 150, 80)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 90, 40)),
+})
+oitcBadgeGrad.Parent = oitcBadge
+local oitcBadgeText = Instance.new("TextLabel")
+oitcBadgeText.BackgroundTransparency = 1
+oitcBadgeText.Size = UDim2.fromScale(1, 1)
+oitcBadgeText.Font = Theme.FontTitle
+oitcBadgeText.TextSize = 11
+oitcBadgeText.TextColor3 = Color3.fromRGB(255, 255, 255)
+oitcBadgeText.Text = "OITC ONLY"
+oitcBadgeText.Parent = oitcBadge
 
-local title = Instance.new("TextLabel")
-title.BackgroundTransparency = 1
-title.Position = UDim2.fromOffset(0, 32)
-title.Size = UDim2.new(1, 0, 0, 36)
-title.Font = Theme.FontTitle
-title.TextSize = 30
-title.TextXAlignment = Enum.TextXAlignment.Left
-title.TextColor3 = Theme.Text
-title.Text = Config.Hub.Title
-title.Parent = playCard
+local heroTitle = Instance.new("TextLabel")
+heroTitle.BackgroundTransparency = 1
+heroTitle.Position = UDim2.fromOffset(0, 36)
+heroTitle.Size = UDim2.new(1, 0, 0, 48)
+heroTitle.Font = Theme.FontTitle
+heroTitle.TextSize = 42
+heroTitle.TextXAlignment = Enum.TextXAlignment.Left
+heroTitle.TextColor3 = Theme.Text
+heroTitle.Text = Config.Hub.Title
+heroTitle.Parent = playHero
 
-local subtitle = Instance.new("TextLabel")
-subtitle.BackgroundTransparency = 1
-subtitle.Position = UDim2.fromOffset(0, 70)
-subtitle.Size = UDim2.new(1, 0, 0, 22)
-subtitle.Font = Theme.FontBody
-subtitle.TextSize = 14
-subtitle.TextXAlignment = Enum.TextXAlignment.Left
-subtitle.TextColor3 = Theme.TextMuted
-subtitle.Text = Config.Hub.Subtitle
-subtitle.Parent = playCard
+local heroSub = Instance.new("TextLabel")
+heroSub.BackgroundTransparency = 1
+heroSub.Position = UDim2.fromOffset(0, 88)
+heroSub.Size = UDim2.new(1, 0, 0, 22)
+heroSub.Font = Theme.FontBody
+heroSub.TextSize = 15
+heroSub.TextXAlignment = Enum.TextXAlignment.Left
+heroSub.TextColor3 = Theme.TextMuted
+heroSub.Text = Config.Hub.Subtitle
+heroSub.Parent = playHero
 
-local rulesCard = Instance.new("Frame")
-rulesCard.Position = UDim2.fromOffset(0, 108)
-rulesCard.Size = UDim2.new(1, 0, 0, 180)
-rulesCard.BackgroundColor3 = Theme.PanelAlt
-rulesCard.BorderSizePixel = 0
-rulesCard.Parent = playCard
-corner(rulesCard, Theme.RadiusSm)
-stroke(rulesCard)
-do
-	local accentBar = Instance.new("Frame")
-	accentBar.Size = UDim2.new(1, 0, 0, 3)
-	accentBar.Position = UDim2.new(0, 0, 1, -3)
-	accentBar.BackgroundColor3 = Theme.OITC
-	accentBar.BorderSizePixel = 0
-	accentBar.Parent = rulesCard
-	local rp = Instance.new("UIPadding")
-	rp.PaddingTop = UDim.new(0, 16)
-	rp.PaddingLeft = UDim.new(0, 16)
-	rp.PaddingRight = UDim.new(0, 16)
-	rp.Parent = rulesCard
-end
+-- Wide rules panel
+local rulesPanel = Instance.new("Frame")
+rulesPanel.Name = "Rules"
+rulesPanel.Position = UDim2.fromOffset(0, 140)
+rulesPanel.Size = UDim2.new(1, 0, 0, 220)
+rulesPanel.BackgroundColor3 = Theme.Panel
+rulesPanel.BorderSizePixel = 0
+rulesPanel.Parent = playPage
+corner(rulesPanel, Theme.Radius)
+stroke(rulesPanel, Theme.Stroke, 1, 0.25)
+
+local rulesGrad = Instance.new("UIGradient")
+rulesGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 24, 38)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 16, 26)),
+})
+rulesGrad.Rotation = 110
+rulesGrad.Parent = rulesPanel
+
+local rulesAccent = Instance.new("Frame")
+rulesAccent.Size = UDim2.new(0, 4, 1, 0)
+rulesAccent.BackgroundColor3 = Theme.OITC
+rulesAccent.BorderSizePixel = 0
+rulesAccent.Parent = rulesPanel
+corner(rulesAccent, 2)
+
+local rulesPad = Instance.new("UIPadding")
+rulesPad.PaddingTop = UDim.new(0, 24)
+rulesPad.PaddingBottom = UDim.new(0, 24)
+rulesPad.PaddingLeft = UDim.new(0, 28)
+rulesPad.PaddingRight = UDim.new(0, 28)
+rulesPad.Parent = rulesPanel
+
+local rulesHeading = Instance.new("TextLabel")
+rulesHeading.BackgroundTransparency = 1
+rulesHeading.Size = UDim2.new(1, 0, 0, 20)
+rulesHeading.Font = Theme.FontTitle
+rulesHeading.TextSize = 13
+rulesHeading.TextXAlignment = Enum.TextXAlignment.Left
+rulesHeading.TextColor3 = Theme.OITC
+rulesHeading.Text = "MATCH RULES"
+rulesHeading.Parent = rulesPanel
 
 local rulesBody = Instance.new("TextLabel")
 rulesBody.BackgroundTransparency = 1
-rulesBody.Size = UDim2.fromScale(1, 1)
+rulesBody.Position = UDim2.fromOffset(0, 28)
+rulesBody.Size = UDim2.new(1, 0, 1, -28)
 rulesBody.Font = Theme.FontBody
-rulesBody.TextSize = 14
+rulesBody.TextSize = 15
 rulesBody.TextWrapped = true
 rulesBody.TextXAlignment = Enum.TextXAlignment.Left
 rulesBody.TextYAlignment = Enum.TextYAlignment.Top
@@ -342,32 +515,43 @@ rulesBody.Text = string.format(
 	Config.OITC.KillsToWin,
 	Config.Economy.CreditsPerWin
 )
-rulesBody.Parent = rulesCard
+rulesBody.Parent = rulesPanel
 
+-- Expandable how-to
 local howTo = Instance.new("TextLabel")
 howTo.BackgroundTransparency = 1
-howTo.Position = UDim2.fromOffset(0, 300)
-howTo.Size = UDim2.new(1, 0, 0, 52)
+howTo.Position = UDim2.fromOffset(0, 376)
+howTo.Size = UDim2.new(1, 0, 0, 48)
 howTo.Font = Theme.FontBody
-howTo.TextSize = 12
+howTo.TextSize = 13
 howTo.TextWrapped = true
 howTo.TextXAlignment = Enum.TextXAlignment.Left
 howTo.TextYAlignment = Enum.TextYAlignment.Top
 howTo.TextColor3 = Theme.TextDim
 howTo.Text = Config.Hub.HowToOITC or Config.Hub.HowTo
 howTo.Visible = false
-howTo.Parent = playCard
+howTo.Parent = playPage
 
-local footer = Instance.new("Frame")
-footer.BackgroundTransparency = 1
-footer.AnchorPoint = Vector2.new(0.5, 1)
-footer.Position = UDim2.new(0.5, 0, 1, 0)
-footer.Size = UDim2.new(1, 0, 0, 56)
-footer.Parent = playCard
+-- Bottom action bar spanning content
+local playBar = Instance.new("Frame")
+playBar.Name = "ActionBar"
+playBar.AnchorPoint = Vector2.new(0, 1)
+playBar.Position = UDim2.new(0, 0, 1, 0)
+playBar.Size = UDim2.new(1, 0, 0, 72)
+playBar.BackgroundColor3 = Theme.Panel
+playBar.BorderSizePixel = 0
+playBar.Parent = playPage
+corner(playBar, Theme.Radius)
+stroke(playBar, Theme.Stroke, 1, 0.3)
+
+local barPad = Instance.new("UIPadding")
+barPad.PaddingLeft = UDim.new(0, 20)
+barPad.PaddingRight = UDim.new(0, 20)
+barPad.Parent = playBar
 
 local howBtn = Instance.new("TextButton")
-howBtn.Size = UDim2.fromOffset(130, 48)
-howBtn.Position = UDim2.fromOffset(0, 4)
+howBtn.Size = UDim2.fromOffset(140, 48)
+howBtn.Position = UDim2.new(0, 0, 0.5, -24)
 howBtn.BackgroundColor3 = Theme.PanelAlt
 howBtn.BorderSizePixel = 0
 howBtn.Font = Theme.FontTitle
@@ -375,24 +559,32 @@ howBtn.TextSize = 13
 howBtn.TextColor3 = Theme.TextMuted
 howBtn.Text = "HOW TO PLAY"
 howBtn.AutoButtonColor = false
-howBtn.Parent = footer
+howBtn.Parent = playBar
 corner(howBtn, Theme.RadiusSm)
-stroke(howBtn)
+stroke(howBtn, Theme.Stroke, 1, 0.3)
 
 local startBtn = Instance.new("TextButton")
-startBtn.AnchorPoint = Vector2.new(1, 0)
-startBtn.Position = UDim2.new(1, 0, 0, 0)
-startBtn.Size = UDim2.fromOffset(240, 56)
+startBtn.AnchorPoint = Vector2.new(1, 0.5)
+startBtn.Position = UDim2.new(1, 0, 0.5, 0)
+startBtn.Size = UDim2.fromOffset(280, 52)
 startBtn.BackgroundColor3 = Theme.Success
 startBtn.BorderSizePixel = 0
 startBtn.Font = Theme.FontTitle
 startBtn.TextSize = 20
 startBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-startBtn.Text = "START"
+startBtn.Text = "START MATCH"
 startBtn.AutoButtonColor = false
-startBtn.Parent = footer
+startBtn.Parent = playBar
 corner(startBtn, Theme.RadiusSm)
-stroke(startBtn, Color3.fromRGB(100, 220, 150), 1)
+stroke(startBtn, Color3.fromRGB(100, 220, 150), 1, 0.35)
+
+local startGrad = Instance.new("UIGradient")
+startGrad.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(70, 200, 135)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(40, 150, 100)),
+})
+startGrad.Rotation = 90
+startGrad.Parent = startBtn
 
 howBtn.MouseButton1Click:Connect(function()
 	howToExpanded = not howToExpanded
@@ -402,7 +594,7 @@ end)
 
 startBtn.MouseEnter:Connect(function()
 	if startBtn.Active then
-		startBtn.BackgroundColor3 = Color3.fromRGB(70, 200, 135)
+		startBtn.BackgroundColor3 = Theme.SuccessHover
 	end
 end)
 startBtn.MouseLeave:Connect(function()
@@ -412,68 +604,88 @@ startBtn.MouseLeave:Connect(function()
 end)
 
 --------------------------------------------------------------------------
--- SHOP + INVENTORY helpers
+-- SHOP + INVENTORY — grid of item cards filling main area
 --------------------------------------------------------------------------
+local function makePageHeader(parent: Frame, titleText: string, subText: string): Frame
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.Size = UDim2.new(1, 0, 0, 64)
+	header.BackgroundTransparency = 1
+	header.Parent = parent
+
+	local t = Instance.new("TextLabel")
+	t.BackgroundTransparency = 1
+	t.Size = UDim2.new(1, 0, 0, 32)
+	t.Font = Theme.FontTitle
+	t.TextSize = 28
+	t.TextXAlignment = Enum.TextXAlignment.Left
+	t.TextColor3 = Theme.Text
+	t.Text = titleText
+	t.Parent = header
+
+	local s = Instance.new("TextLabel")
+	s.BackgroundTransparency = 1
+	s.Position = UDim2.fromOffset(0, 36)
+	s.Size = UDim2.new(1, 0, 0, 20)
+	s.Font = Theme.FontBody
+	s.TextSize = 14
+	s.TextXAlignment = Enum.TextXAlignment.Left
+	s.TextColor3 = Theme.TextMuted
+	s.Text = subText
+	s.Parent = header
+	return header
+end
+
+makePageHeader(shopPage, "SHOP", "Spend Credits from kills & wins on cosmetics")
+makePageHeader(invPage, "INVENTORY", "Equip owned skins for your next match")
+
 local shopScroll = Instance.new("ScrollingFrame")
 shopScroll.Name = "ShopScroll"
-shopScroll.Size = UDim2.fromScale(1, 1)
-shopScroll.BackgroundColor3 = Theme.Panel
+shopScroll.Position = UDim2.fromOffset(0, 76)
+shopScroll.Size = UDim2.new(1, 0, 1, -76)
+shopScroll.BackgroundTransparency = 1
 shopScroll.BorderSizePixel = 0
-shopScroll.ScrollBarThickness = 6
+shopScroll.ScrollBarThickness = 5
+shopScroll.ScrollBarImageColor3 = Theme.StrokeBright
 shopScroll.CanvasSize = UDim2.fromOffset(0, 0)
 shopScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 shopScroll.Parent = shopPage
-corner(shopScroll)
-stroke(shopScroll)
-do
-	local p = Instance.new("UIPadding")
-	p.PaddingTop = UDim.new(0, 16)
-	p.PaddingBottom = UDim.new(0, 16)
-	p.PaddingLeft = UDim.new(0, 16)
-	p.PaddingRight = UDim.new(0, 16)
-	p.Parent = shopScroll
-	local l = Instance.new("UIListLayout")
-	l.Padding = UDim.new(0, 10)
-	l.SortOrder = Enum.SortOrder.LayoutOrder
-	l.Parent = shopScroll
-end
+
+local shopList = Instance.new("UIListLayout")
+shopList.Padding = UDim.new(0, 20)
+shopList.SortOrder = Enum.SortOrder.LayoutOrder
+shopList.Parent = shopScroll
 
 local invScroll = Instance.new("ScrollingFrame")
 invScroll.Name = "InvScroll"
-invScroll.Size = UDim2.fromScale(1, 1)
-invScroll.BackgroundColor3 = Theme.Panel
+invScroll.Position = UDim2.fromOffset(0, 76)
+invScroll.Size = UDim2.new(1, 0, 1, -76)
+invScroll.BackgroundTransparency = 1
 invScroll.BorderSizePixel = 0
-invScroll.ScrollBarThickness = 6
+invScroll.ScrollBarThickness = 5
+invScroll.ScrollBarImageColor3 = Theme.StrokeBright
 invScroll.CanvasSize = UDim2.fromOffset(0, 0)
 invScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 invScroll.Parent = invPage
-corner(invScroll)
-stroke(invScroll)
-do
-	local p = Instance.new("UIPadding")
-	p.PaddingTop = UDim.new(0, 16)
-	p.PaddingBottom = UDim.new(0, 16)
-	p.PaddingLeft = UDim.new(0, 16)
-	p.PaddingRight = UDim.new(0, 16)
-	p.Parent = invScroll
-	local l = Instance.new("UIListLayout")
-	l.Padding = UDim.new(0, 10)
-	l.SortOrder = Enum.SortOrder.LayoutOrder
-	l.Parent = invScroll
-end
 
+local invList = Instance.new("UIListLayout")
+invList.Padding = UDim.new(0, 20)
+invList.SortOrder = Enum.SortOrder.LayoutOrder
+invList.Parent = invScroll
+
+-- Status toast along bottom of main
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Name = "Status"
 statusLabel.AnchorPoint = Vector2.new(0.5, 1)
-statusLabel.Position = UDim2.new(0.5, 0, 1, -4)
-statusLabel.Size = UDim2.new(1, -48, 0, 22)
+statusLabel.Position = UDim2.new(0.5, 0, 1, -8)
+statusLabel.Size = UDim2.new(1, -16, 0, 22)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Font = Theme.FontBody
 statusLabel.TextSize = 13
 statusLabel.TextColor3 = Theme.Warning
 statusLabel.Text = ""
-statusLabel.ZIndex = 5
-statusLabel.Parent = shell
+statusLabel.ZIndex = 10
+statusLabel.Parent = main
 
 local function setStatus(msg: string, ok: boolean?)
 	statusMsg = msg
@@ -488,25 +700,6 @@ local function setStatus(msg: string, ok: boolean?)
 	end
 end
 
-local function colorSwatch(parent: Instance, color: Color3?): Frame
-	local f = Instance.new("Frame")
-	f.Size = UDim2.fromOffset(36, 36)
-	f.BackgroundColor3 = color or Theme.Card
-	f.BorderSizePixel = 0
-	f.Parent = parent
-	corner(f, 6)
-	stroke(f, Theme.StrokeBright)
-	return f
-end
-
-local function clearChildren(frame: Instance)
-	for _, c in frame:GetChildren() do
-		if c:IsA("Frame") or c:IsA("TextLabel") or c:IsA("TextButton") then
-			c:Destroy()
-		end
-	end
-end
-
 local CATEGORY_ORDER = { "PistolSkin", "KnifeSkin", "Trail", "Hitmarker", "Title" }
 local CATEGORY_LABELS = {
 	PistolSkin = "PISTOL SKINS",
@@ -516,57 +709,75 @@ local CATEGORY_LABELS = {
 	Title = "TITLES",
 }
 
-local function makeItemRow(parent: Instance, item: any, mode: string, order: number)
+local CARD_H = Theme.CardHeight or 168
+local GRID_GAP = Theme.GridGap or 14
+
+local function makeItemCard(parent: Instance, item: any, mode: string, order: number)
 	local owned = ownedSet[item.Id] == true or item.Owned == true
 	local isEq = equipped[item.Category] == item.Id or item.Equipped == true
 
-	local row = Instance.new("Frame")
-	row.Name = item.Id
-	row.Size = UDim2.new(1, 0, 0, 72)
-	row.BackgroundColor3 = Theme.Card
-	row.BorderSizePixel = 0
-	row.LayoutOrder = order
-	row.Parent = parent
-	corner(row, Theme.RadiusSm)
-	stroke(row, if isEq then Theme.Equipped else Theme.Stroke)
+	local card = Instance.new("Frame")
+	card.Name = item.Id
+	card.Size = UDim2.new(0, 210, 0, CARD_H)
+	card.BackgroundColor3 = if isEq then Theme.CardSelected else Theme.Card
+	card.BorderSizePixel = 0
+	card.LayoutOrder = order
+	card.Active = true
+	card.Parent = parent
+	corner(card, Theme.RadiusSm)
+	stroke(card, if isEq then Theme.Equipped else Theme.Stroke, 1, if isEq then 0.05 else 0.3)
 
+	-- Color preview block
 	local swatchColor = item.HandleColor or item.TrailColor or item.HitColor or item.TitleColor or Theme.Accent
-	local sw = colorSwatch(row, swatchColor)
-	sw.Position = UDim2.fromOffset(12, 18)
+	local preview = Instance.new("Frame")
+	preview.Size = UDim2.new(1, -20, 0, 56)
+	preview.Position = UDim2.fromOffset(10, 10)
+	preview.BackgroundColor3 = swatchColor
+	preview.BorderSizePixel = 0
+	preview.Parent = card
+	corner(preview, Theme.RadiusXs)
+	local tipCol = item.TipColor or item.HitHeadColor or Theme.AccentGlow
+	local tipBar = Instance.new("Frame")
+	tipBar.AnchorPoint = Vector2.new(0, 1)
+	tipBar.Position = UDim2.new(0, 0, 1, 0)
+	tipBar.Size = UDim2.new(1, 0, 0, 6)
+	tipBar.BackgroundColor3 = tipCol
+	tipBar.BorderSizePixel = 0
+	tipBar.Parent = preview
 
 	local nameL = Instance.new("TextLabel")
 	nameL.BackgroundTransparency = 1
-	nameL.Position = UDim2.fromOffset(60, 10)
-	nameL.Size = UDim2.new(1, -200, 0, 22)
+	nameL.Position = UDim2.fromOffset(12, 74)
+	nameL.Size = UDim2.new(1, -24, 0, 20)
 	nameL.Font = Theme.FontTitle
-	nameL.TextSize = 15
+	nameL.TextSize = 14
 	nameL.TextXAlignment = Enum.TextXAlignment.Left
+	nameL.TextTruncate = Enum.TextTruncate.AtEnd
 	nameL.TextColor3 = Theme.Text
 	nameL.Text = item.Name or item.Id
-	nameL.Parent = row
+	nameL.Parent = card
 
 	local desc = Instance.new("TextLabel")
 	desc.BackgroundTransparency = 1
-	desc.Position = UDim2.fromOffset(60, 34)
-	desc.Size = UDim2.new(1, -200, 0, 28)
+	desc.Position = UDim2.fromOffset(12, 94)
+	desc.Size = UDim2.new(1, -24, 0, 28)
 	desc.Font = Theme.FontBody
-	desc.TextSize = 12
+	desc.TextSize = 11
 	desc.TextWrapped = true
 	desc.TextXAlignment = Enum.TextXAlignment.Left
 	desc.TextYAlignment = Enum.TextYAlignment.Top
 	desc.TextColor3 = Theme.TextDim
 	desc.Text = item.Description or item.Category or ""
-	desc.Parent = row
+	desc.Parent = card
 
 	local action = Instance.new("TextButton")
-	action.AnchorPoint = Vector2.new(1, 0.5)
-	action.Position = UDim2.new(1, -12, 0.5, 0)
-	action.Size = UDim2.fromOffset(110, 36)
+	action.Position = UDim2.fromOffset(10, CARD_H - 42)
+	action.Size = UDim2.new(1, -20, 0, 32)
 	action.BorderSizePixel = 0
 	action.Font = Theme.FontTitle
-	action.TextSize = 13
+	action.TextSize = 12
 	action.AutoButtonColor = false
-	action.Parent = row
+	action.Parent = card
 	corner(action, Theme.RadiusXs)
 
 	if mode == "shop" then
@@ -593,7 +804,6 @@ local function makeItemRow(parent: Instance, item: any, mode: string, order: num
 			end)
 		end
 	else
-		-- inventory: only owned
 		if isEq then
 			action.Text = "EQUIPPED"
 			action.BackgroundColor3 = Theme.Equipped
@@ -608,59 +818,94 @@ local function makeItemRow(parent: Instance, item: any, mode: string, order: num
 			end)
 		end
 	end
+
+	-- Hover lift
+	card.MouseEnter:Connect(function()
+		if not isEq then
+			card.BackgroundColor3 = Theme.CardHover
+		end
+	end)
+	card.MouseLeave:Connect(function()
+		if not isEq then
+			card.BackgroundColor3 = Theme.Card
+		end
+	end)
+end
+
+local function makeCategorySection(parent: Instance, cat: string, items: { any }, mode: string, order: number): number
+	if #items == 0 then
+		return order
+	end
+
+	local section = Instance.new("Frame")
+	section.Name = cat
+	section.Size = UDim2.new(1, 0, 0, 0)
+	section.AutomaticSize = Enum.AutomaticSize.Y
+	section.BackgroundTransparency = 1
+	section.LayoutOrder = order
+	section.Parent = parent
+	order += 1
+
+	local catLabel = Instance.new("TextLabel")
+	catLabel.Size = UDim2.new(1, 0, 0, 22)
+	catLabel.BackgroundTransparency = 1
+	catLabel.Font = Theme.FontTitle
+	catLabel.TextSize = 12
+	catLabel.TextXAlignment = Enum.TextXAlignment.Left
+	catLabel.TextColor3 = Theme.TextDim
+	catLabel.Text = CATEGORY_LABELS[cat] or cat
+	catLabel.Parent = section
+
+	local gridWrap = Instance.new("Frame")
+	gridWrap.Name = "Grid"
+	gridWrap.Position = UDim2.fromOffset(0, 28)
+	gridWrap.Size = UDim2.new(1, 0, 0, 0)
+	gridWrap.AutomaticSize = Enum.AutomaticSize.Y
+	gridWrap.BackgroundTransparency = 1
+	gridWrap.Parent = section
+
+	local grid = Instance.new("UIGridLayout")
+	grid.CellSize = UDim2.fromOffset(210, CARD_H)
+	grid.CellPadding = UDim2.fromOffset(GRID_GAP, GRID_GAP)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.FillDirectionMaxCells = 0 -- fill available width
+	grid.Parent = gridWrap
+
+	for i, item in items do
+		makeItemCard(gridWrap, item, mode, i)
+	end
+
+	return order
 end
 
 local function rebuildShop()
 	clearChildren(shopScroll)
-	local order = 0
-	local header = Instance.new("TextLabel")
-	header.Size = UDim2.new(1, 0, 0, 28)
-	header.BackgroundTransparency = 1
-	header.Font = Theme.FontTitle
-	header.TextSize = 18
-	header.TextXAlignment = Enum.TextXAlignment.Left
-	header.TextColor3 = Theme.Text
-	header.Text = "SHOP  ·  Spend Credits from kills & wins"
-	header.LayoutOrder = order
-	header.Parent = shopScroll
-	order += 1
+	-- re-add layout
+	local l = Instance.new("UIListLayout")
+	l.Padding = UDim.new(0, 20)
+	l.SortOrder = Enum.SortOrder.LayoutOrder
+	l.Parent = shopScroll
 
+	local order = 0
 	for _, cat in CATEGORY_ORDER do
-		local catLabel = Instance.new("TextLabel")
-		catLabel.Size = UDim2.new(1, 0, 0, 22)
-		catLabel.BackgroundTransparency = 1
-		catLabel.Font = Theme.FontTitle
-		catLabel.TextSize = 12
-		catLabel.TextXAlignment = Enum.TextXAlignment.Left
-		catLabel.TextColor3 = Theme.TextDim
-		catLabel.Text = CATEGORY_LABELS[cat] or cat
-		catLabel.LayoutOrder = order
-		catLabel.Parent = shopScroll
-		order += 1
+		local list = {}
 		for _, item in shopItems do
 			if item.Category == cat then
-				makeItemRow(shopScroll, item, "shop", order)
-				order += 1
+				table.insert(list, item)
 			end
 		end
+		order = makeCategorySection(shopScroll, cat, list, "shop", order)
 	end
 end
 
 local function rebuildInventory()
 	clearChildren(invScroll)
-	local order = 0
-	local header = Instance.new("TextLabel")
-	header.Size = UDim2.new(1, 0, 0, 28)
-	header.BackgroundTransparency = 1
-	header.Font = Theme.FontTitle
-	header.TextSize = 18
-	header.TextXAlignment = Enum.TextXAlignment.Left
-	header.TextColor3 = Theme.Text
-	header.Text = "INVENTORY  ·  Equip skins for next match"
-	header.LayoutOrder = order
-	header.Parent = invScroll
-	order += 1
+	local l = Instance.new("UIListLayout")
+	l.Padding = UDim.new(0, 20)
+	l.SortOrder = Enum.SortOrder.LayoutOrder
+	l.Parent = invScroll
 
+	local order = 0
 	local any = false
 	for _, cat in CATEGORY_ORDER do
 		local ownedInCat = {}
@@ -671,29 +916,15 @@ local function rebuildInventory()
 		end
 		if #ownedInCat > 0 then
 			any = true
-			local catLabel = Instance.new("TextLabel")
-			catLabel.Size = UDim2.new(1, 0, 0, 22)
-			catLabel.BackgroundTransparency = 1
-			catLabel.Font = Theme.FontTitle
-			catLabel.TextSize = 12
-			catLabel.TextXAlignment = Enum.TextXAlignment.Left
-			catLabel.TextColor3 = Theme.TextDim
-			catLabel.Text = CATEGORY_LABELS[cat] or cat
-			catLabel.LayoutOrder = order
-			catLabel.Parent = invScroll
-			order += 1
-			for _, item in ownedInCat do
-				makeItemRow(invScroll, item, "inv", order)
-				order += 1
-			end
+			order = makeCategorySection(invScroll, cat, ownedInCat, "inv", order)
 		end
 	end
 	if not any then
 		local empty = Instance.new("TextLabel")
-		empty.Size = UDim2.new(1, 0, 0, 40)
+		empty.Size = UDim2.new(1, 0, 0, 48)
 		empty.BackgroundTransparency = 1
 		empty.Font = Theme.FontBody
-		empty.TextSize = 14
+		empty.TextSize = 15
 		empty.TextColor3 = Theme.TextMuted
 		empty.Text = "No items yet — visit the Shop."
 		empty.LayoutOrder = order
@@ -730,49 +961,40 @@ local function applyShopPayload(payload: any)
 end
 
 --------------------------------------------------------------------------
--- SETTINGS STUB
+-- SETTINGS — full-width panel (not a tiny centered card)
 --------------------------------------------------------------------------
-local setCard = Instance.new("Frame")
-setCard.AnchorPoint = Vector2.new(0.5, 0.5)
-setCard.Position = UDim2.fromScale(0.5, 0.5)
-setCard.Size = UDim2.fromOffset(520, 260)
-setCard.BackgroundColor3 = Theme.Panel
-setCard.BorderSizePixel = 0
-setCard.Parent = setPage
-corner(setCard)
-stroke(setCard)
-do
-	local p = Instance.new("UIPadding")
-	p.PaddingTop = UDim.new(0, 28)
-	p.PaddingLeft = UDim.new(0, 28)
-	p.PaddingRight = UDim.new(0, 28)
-	p.Parent = setCard
-end
-local setTitle = Instance.new("TextLabel")
-setTitle.BackgroundTransparency = 1
-setTitle.Size = UDim2.new(1, 0, 0, 28)
-setTitle.Font = Theme.FontTitle
-setTitle.TextSize = 22
-setTitle.TextXAlignment = Enum.TextXAlignment.Left
-setTitle.TextColor3 = Theme.Text
-setTitle.Text = "SETTINGS"
-setTitle.Parent = setCard
+local setHeader = makePageHeader(setPage, "SETTINGS", "Audio, sensitivity, and graphics")
+
+local setPanel = Instance.new("Frame")
+setPanel.Position = UDim2.fromOffset(0, 76)
+setPanel.Size = UDim2.new(1, 0, 0, 220)
+setPanel.BackgroundColor3 = Theme.Panel
+setPanel.BorderSizePixel = 0
+setPanel.Parent = setPage
+corner(setPanel, Theme.Radius)
+stroke(setPanel, Theme.Stroke, 1, 0.25)
+
+local setPad = Instance.new("UIPadding")
+setPad.PaddingTop = UDim.new(0, 28)
+setPad.PaddingLeft = UDim.new(0, 28)
+setPad.PaddingRight = UDim.new(0, 28)
+setPad.Parent = setPanel
+
 local setBody = Instance.new("TextLabel")
 setBody.BackgroundTransparency = 1
-setBody.Position = UDim2.fromOffset(0, 48)
-setBody.Size = UDim2.new(1, 0, 0, 140)
+setBody.Size = UDim2.new(1, 0, 1, -28)
 setBody.Font = Theme.FontBody
-setBody.TextSize = 14
+setBody.TextSize = 15
 setBody.TextWrapped = true
 setBody.TextXAlignment = Enum.TextXAlignment.Left
 setBody.TextYAlignment = Enum.TextYAlignment.Top
 setBody.TextColor3 = Theme.TextMuted
 setBody.Text =
 	"Audio mix, sensitivity, and graphics toggles will land here.\n\nFor now: use Roblox Esc menu for volume / graphics.\nSkins & titles are under Shop / Inventory.\nCredits persist via DataStore (memory fallback in Studio)."
-setBody.Parent = setCard
+setBody.Parent = setPanel
 
 --------------------------------------------------------------------------
--- Countdown + Winner overlays (match hub theme)
+-- Countdown + Winner overlays
 --------------------------------------------------------------------------
 local countdownGui = Instance.new("ScreenGui")
 countdownGui.Name = "CQCCountdown"
@@ -785,7 +1007,7 @@ countdownGui.Parent = playerGui
 local cdDim = Instance.new("Frame")
 cdDim.Size = UDim2.fromScale(1, 1)
 cdDim.BackgroundColor3 = Theme.Bg
-cdDim.BackgroundTransparency = 0.45
+cdDim.BackgroundTransparency = 0.35
 cdDim.BorderSizePixel = 0
 cdDim.Active = true
 cdDim.Parent = countdownGui
@@ -825,7 +1047,7 @@ winnerGui.Parent = playerGui
 local winnerDim = Instance.new("Frame")
 winnerDim.Size = UDim2.fromScale(1, 1)
 winnerDim.BackgroundColor3 = Theme.Bg
-winnerDim.BackgroundTransparency = 0.35
+winnerDim.BackgroundTransparency = 0.2
 winnerDim.BorderSizePixel = 0
 winnerDim.Active = true
 winnerDim.Parent = winnerGui
@@ -833,7 +1055,7 @@ winnerDim.Parent = winnerGui
 local winnerCard = Instance.new("Frame")
 winnerCard.AnchorPoint = Vector2.new(0.5, 0.5)
 winnerCard.Position = UDim2.fromScale(0.5, 0.5)
-winnerCard.Size = UDim2.fromOffset(480, 280)
+winnerCard.Size = UDim2.fromOffset(520, 300)
 winnerCard.BackgroundColor3 = Theme.Panel
 winnerCard.BorderSizePixel = 0
 winnerCard.Parent = winnerGui
@@ -916,7 +1138,7 @@ hubAgainBtn.Parent = endFooter
 corner(hubAgainBtn, Theme.RadiusSm)
 
 --------------------------------------------------------------------------
--- Camera / flow helpers
+-- Camera: Scriptable fixed on dark void while hub open
 --------------------------------------------------------------------------
 local function playLocalSound(soundId: string?, volume: number?)
 	if typeof(soundId) ~= "string" or soundId == "" or soundId == "rbxassetid://0" then
@@ -935,6 +1157,33 @@ local function unlockMouse()
 	UserInputService.MouseIconEnabled = true
 end
 
+local HUB_CAM_CF = CFrame.new(0, 5000, 0) -- far above map, dark void
+
+local function stopHubCamera()
+	if hubCamConn then
+		hubCamConn:Disconnect()
+		hubCamConn = nil
+	end
+end
+
+local function startHubCamera()
+	stopHubCamera()
+	local cam = Workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	cam.CameraType = Enum.CameraType.Scriptable
+	cam.CFrame = HUB_CAM_CF
+	cam.FieldOfView = 70
+	hubCamConn = RunService.RenderStepped:Connect(function()
+		local c = Workspace.CurrentCamera
+		if c and gui.Enabled then
+			c.CameraType = Enum.CameraType.Scriptable
+			c.CFrame = HUB_CAM_CF
+		end
+	end)
+end
+
 local function applyHubCamera(inHub: boolean)
 	player:SetAttribute("CQCInHub", inHub)
 	if inHub then
@@ -945,7 +1194,13 @@ local function applyHubCamera(inHub: boolean)
 		pcall(function()
 			player.DevEnableMouseLock = false
 		end)
+		startHubCamera()
 	else
+		stopHubCamera()
+		local cam = Workspace.CurrentCamera
+		if cam then
+			cam.CameraType = Enum.CameraType.Custom
+		end
 		if Config.Camera.LockFirstPerson then
 			player.CameraMode = Enum.CameraMode.LockFirstPerson
 		end
@@ -960,11 +1215,12 @@ applyHubCamera(true)
 
 local function hideHub()
 	gui.Enabled = false
+	stopHubCamera()
 end
 
 local function showHub()
 	started = false
-	startBtn.Text = "START"
+	startBtn.Text = "START MATCH"
 	startBtn.Active = true
 	startBtn.BackgroundColor3 = Theme.Success
 	winnerGui.Enabled = false
@@ -1128,6 +1384,11 @@ matchEndedRemote.OnClientEvent:Connect(function(payload)
 
 	winnerGui.Enabled = true
 	unlockMouse()
+	stopHubCamera()
+	local cam = Workspace.CurrentCamera
+	if cam then
+		cam.CameraType = Enum.CameraType.Custom
+	end
 	player.CameraMode = Enum.CameraMode.Classic
 	player.CameraMinZoomDistance = Config.Camera.HubMinZoom or 8
 	player.CameraMaxZoomDistance = Config.Camera.HubMaxZoom or 20
@@ -1166,7 +1427,6 @@ dataSyncRemote.OnClientEvent:Connect(function(payload)
 			end
 		end
 	end
-	-- If we already have catalog rows, refresh ownership flags
 	if #shopItems > 0 then
 		for _, item in shopItems do
 			item.Owned = ownedSet[item.Id] == true

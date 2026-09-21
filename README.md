@@ -15,7 +15,13 @@ No free Robux, no exploits, no aimbot — just a clean Luau starter.
 | **Inventory** | Owned items; **Equip** pistol/knife skin, trail, hitmarker, title |
 | **Settings** | Stub (points to Roblox Esc for audio/graphics) |
 
-Hub `ScreenGui` uses **IgnoreGuiInset**, full-screen `UDim2.fromScale(1,1)` dark overlay (blocks world clicks), shared `Theme` (corners, strokes, gradients, hover states).
+Hub is a **true full-bleed game menu** (not a floating centered modal):
+
+- Root `Frame` **Size (1,0,1,0)**, **fully opaque** dark background, `IgnoreGuiInset`, high `DisplayOrder` — **zero world visibility** behind the hub
+- **Left sidebar** (~248px): logo/title, nav **PLAY / SHOP / INVENTORY / SETTINGS**, credits badge at bottom
+- **Main content** fills remaining width/height with ~40px padding (hero + wide rules + bottom START bar on Play; scrolling **card grids** on Shop/Inventory)
+- Camera set to **Scriptable** fixed above the map while hub is open (belt-and-suspenders with opaque UI)
+- Shared `Theme` tokens (sidebar width, content pad, card size, gradients, hover/selected states)
 
 ## Credits economy
 
@@ -115,7 +121,7 @@ roblox-cqc-shooter/
         NPCService.lua
         DoorService.lua
     Client/
-      Hub.client.lua      # full-screen hub tabs + countdown/end
+      Hub.client.lua      # full-bleed sidebar hub + countdown/end
       HUD.client.lua      # strip HUD, kill feed, vignette
       WeaponController.client.lua
       FirstPerson.client.lua
@@ -132,7 +138,7 @@ Studio: new Baseplate → Rojo Connect → **Play**.
 
 ## How to playtest
 
-1. Spawn in **Lobby** — full-screen hub (world dimmed / not clickable).
+1. Spawn in **Lobby** — full-bleed hub menu (opaque UI; 3D world not visible).
 2. **Shop** — buy a skin with starting Credits; **Inventory** — equip it.
 3. **Play → START** → countdown → FP combat with skinned tools.
 4. Kill dummies for score + Credits; win at 5 kills → end overlay.
@@ -153,7 +159,7 @@ See `Config.Economy`, `Config.ShopItems`, `Config.Lighting.Post`, `Config.OITC`,
 
 ## Design notes
 
-- **Full-screen hub** blocks the world; match HUD uses the same Theme.
+- **Full-bleed hub** (sidebar + main) fully occludes the lobby; match HUD uses the same Theme.
 - **Server authority** for purchases, equip, credits, combat.
 - **DataStore** with memory fallback — Studio playtests always work.
 - Tools stay first-person friendly scale; muzzle part named `Muzzle` for FX.
