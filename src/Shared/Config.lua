@@ -1,69 +1,162 @@
 --!strict
 --[[
 	Shared game configuration for the CQC room shooter.
-	Tune damage, range, ammo, reload, feel, sounds, and room layout here.
+	Tune weapons, feel, sounds, room layout, and hub here.
 ]]
 
 local Config = {}
 
--- Weapon (close-range SMG / shotgun hybrid)
-Config.Weapon = {
-	Name = "CQC Blaster",
-	DamageClose = 28, -- damage at point-blank
-	DamageFar = 6, -- damage near max range
-	MaxRange = 55, -- studs; beyond this, raycast is rejected
-	EffectiveRange = 25, -- within this, full close damage
-	FireCooldown = 0.18, -- seconds between shots
-	MagazineSize = 12,
-	ReloadTime = 1.6, -- seconds
-	PelletCount = 1, -- 1 = SMG beam; raise for shotgun spread
-	SpreadDegrees = 2.5, -- cone half-angle when PelletCount > 1
-	MuzzleOffset = Vector3.new(0, 0, -1.5),
+export type WeaponDef = {
+	Id: string,
+	Name: string,
+	DamageClose: number,
+	DamageFar: number,
+	MaxRange: number,
+	EffectiveRange: number,
+	FireCooldown: number,
+	MagazineSize: number,
+	ReloadTime: number,
+	PelletCount: number,
+	SpreadDegrees: number,
+	MuzzleOffset: Vector3,
+	HandleSize: Vector3,
+	HandleColor: Color3,
+	TipColor: Color3,
+	ToolTip: string,
+	Blurb: string,
 }
+
+--[[
+	Three distinct CQC tools. Shotgun = pellet spread; SMG = rapid; Pistol = hard hits.
+]]
+Config.Weapons = {
+	Shotgun = {
+		Id = "Shotgun",
+		Name = "Shotgun",
+		DamageClose = 16,
+		DamageFar = 3,
+		MaxRange = 38,
+		EffectiveRange = 12,
+		FireCooldown = 0.78,
+		MagazineSize = 6,
+		ReloadTime = 2.3,
+		PelletCount = 8,
+		SpreadDegrees = 7.5,
+		MuzzleOffset = Vector3.new(0, 0, -1.6),
+		HandleSize = Vector3.new(0.45, 0.45, 2.4),
+		HandleColor = Color3.fromRGB(55, 42, 32),
+		TipColor = Color3.fromRGB(200, 90, 40),
+		ToolTip = "Pellet spread · Hold LMB · R reload",
+		Blurb = "Devastating up close. 8 pellets, slow pump.",
+	} :: WeaponDef,
+	SMG = {
+		Id = "SMG",
+		Name = "SMG",
+		DamageClose = 14,
+		DamageFar = 5,
+		MaxRange = 55,
+		EffectiveRange = 22,
+		FireCooldown = 0.09,
+		MagazineSize = 30,
+		ReloadTime = 1.55,
+		PelletCount = 1,
+		SpreadDegrees = 3.2,
+		MuzzleOffset = Vector3.new(0, 0, -1.5),
+		HandleSize = Vector3.new(0.35, 0.35, 2.0),
+		HandleColor = Color3.fromRGB(40, 44, 52),
+		TipColor = Color3.fromRGB(80, 160, 220),
+		ToolTip = "Full-auto spray · Hold LMB · R reload",
+		Blurb = "High fire rate, large mag, light per-shot damage.",
+	} :: WeaponDef,
+	Pistol = {
+		Id = "Pistol",
+		Name = "Pistol",
+		DamageClose = 34,
+		DamageFar = 12,
+		MaxRange = 70,
+		EffectiveRange = 28,
+		FireCooldown = 0.26,
+		MagazineSize = 12,
+		ReloadTime = 1.35,
+		PelletCount = 1,
+		SpreadDegrees = 1.1,
+		MuzzleOffset = Vector3.new(0, 0, -1.1),
+		HandleSize = Vector3.new(0.32, 0.4, 1.3),
+		HandleColor = Color3.fromRGB(32, 32, 38),
+		TipColor = Color3.fromRGB(220, 200, 80),
+		ToolTip = "Precise punches · Hold LMB · R reload",
+		Blurb = "Accurate single shots with strong falloff damage.",
+	} :: WeaponDef,
+}
+
+-- Hotbar / hub order
+Config.WeaponOrder = { "Shotgun", "SMG", "Pistol" }
+
+-- Default starting weapon when hub starts the match
+Config.DefaultWeaponId = "SMG"
+
+function Config.GetWeapon(id: string): WeaponDef?
+	return Config.Weapons[id]
+end
+
+function Config.GetWeaponByToolName(name: string): WeaponDef?
+	for _, def in Config.Weapons do
+		if def.Name == name then
+			return def
+		end
+	end
+	return nil
+end
+
+function Config.IsWeaponTool(tool: Instance?): boolean
+	return tool ~= nil and tool:IsA("Tool") and Config.GetWeaponByToolName(tool.Name) ~= nil
+end
+
+-- Legacy single-weapon alias (SMG) for any leftover reads
+Config.Weapon = Config.Weapons.SMG
 
 -- Combat validation
 Config.Combat = {
-	MaxLookDistanceFromCharacter = 8, -- how far origin can be from humanoid root
+	MaxLookDistanceFromCharacter = 8,
 	MinDamage = 1,
 	HeadshotMultiplier = 1.35,
-	FriendlyFire = true, -- players can damage each other
+	FriendlyFire = true,
 }
 
 --[[
 	Gun feel (client). Recoil is CAMERA-ONLY (pitch/yaw offset).
 	Never writes HumanoidRootPart / character CFrame.
-	Server still owns damage — client only plays juice from FireResult.
 ]]
 Config.Feel = {
-	RecoilPitchDegrees = 1.35, -- camera punch up
-	RecoilYawDegrees = 0.35, -- slight random left/right
-	RecoilRecoverSeconds = 0.12, -- how fast punch returns
-	FovKick = 1.8, -- temporary FOV increase on fire
+	RecoilPitchDegrees = 1.35,
+	RecoilYawDegrees = 0.35,
+	RecoilRecoverSeconds = 0.12,
+	FovKick = 1.8,
 	FovRecoverSeconds = 0.14,
 	MuzzleFlashSeconds = 0.06,
 	MuzzleLightBrightness = 4,
 	MuzzleLightRange = 10,
-	TracerDuration = 0.08, -- Beam lifetime
+	TracerDuration = 0.08,
 	TracerWidth = 0.12,
 	HitMarkerSeconds = 0.12,
 	HeadshotMarkerSeconds = 0.18,
-	DamageNumberLifetime = 0.9, -- Billboard lifetime
-	DamageNumberRise = 2.5, -- studs upward
+	DamageNumberLifetime = 0.9,
+	DamageNumberRise = 2.5,
+	-- Per-weapon feel multipliers (applied client-side on shot)
+	RecoilByWeapon = {
+		Shotgun = 2.2,
+		SMG = 0.85,
+		Pistol = 1.35,
+	},
 }
 
---[[
-	Roblox library / well-known free SoundIds.
-	These are common public toolbox IDs that usually resolve in Studio.
-	Swap any ID in Studio if a sound fails to load for your account.
-	Format: rbxassetid://NUMBER
-]]
 Config.SoundIds = {
-	Fire = "rbxassetid://9114224527", -- short gunshot / blaster-like
-	FireAlt = "rbxassetid://9114226351", -- layered secondary crack
-	Reload = "rbxassetid://9111680145", -- mechanical reload / insert
-	Empty = "rbxassetid://9113895097", -- dry click / empty chamber
-	HitConfirm = "rbxassetid://9114221327", -- soft hit tick
-	Headshot = "rbxassetid://9114222212", -- sharper confirm
+	Fire = "rbxassetid://9114224527",
+	FireAlt = "rbxassetid://9114226351",
+	Reload = "rbxassetid://9111680145",
+	Empty = "rbxassetid://9113895097",
+	HitConfirm = "rbxassetid://9114221327",
+	Headshot = "rbxassetid://9114222212",
 }
 
 Config.SoundVolumes = {
@@ -75,12 +168,7 @@ Config.SoundVolumes = {
 	Headshot = 0.7,
 }
 
---[[
-	Indoor room complex (replaces open arena).
-	Grid of square rooms with doorways + swinging doors between neighbors.
-]]
 Config.Arena = {
-	-- Kept for NPCService / legacy references; map uses Config.Map
 	Size = 96,
 	WallHeight = 14,
 	WallThickness = 1.5,
@@ -90,9 +178,9 @@ Config.Arena = {
 }
 
 Config.Map = {
-	GridCols = 3, -- X
-	GridRows = 3, -- Z
-	RoomSize = 30, -- interior square (studs)
+	GridCols = 3,
+	GridRows = 3,
+	RoomSize = 30,
 	WallHeight = 14,
 	WallThickness = 1.5,
 	DoorWidth = 6,
@@ -100,10 +188,8 @@ Config.Map = {
 	DoorThickness = 0.6,
 	FloorY = 0,
 	Ceiling = true,
-	-- Start room grid index (1-based): southwest corner
 	StartCol = 1,
 	StartRow = 1,
-	-- Rooms that get waist-high cover / crawl gaps (col,row)
 	HalfWallRooms = {
 		{ 2, 1 },
 		{ 1, 2 },
@@ -111,15 +197,13 @@ Config.Map = {
 		{ 2, 3 },
 	},
 	CrawlGapRooms = {
-		{ 2, 2 }, -- center
+		{ 2, 2 },
 		{ 3, 1 },
 	},
-	-- Door tween
 	DoorTweenSeconds = 0.35,
 	DoorOpenAngleDegrees = 95,
 }
 
--- Indoor lighting (WorldSetup also places per-room PointLights)
 Config.Lighting = {
 	Ambient = Color3.fromRGB(55, 58, 70),
 	OutdoorAmbient = Color3.fromRGB(40, 42, 50),
@@ -128,7 +212,6 @@ Config.Lighting = {
 	GeographicLatitude = 25,
 }
 
--- NPC dummies for solo testing (placed in specific rooms via WorldSetup offsets)
 Config.NPC = {
 	Count = 3,
 	WalkSpeed = 6,
@@ -136,37 +219,40 @@ Config.NPC = {
 	WanderInterval = 3.5,
 	MaxHealth = 100,
 	Name = "Training Dummy",
-	-- World positions filled by map (room centers); WorldSetup / Main may override via Init(center)
-	-- Offsets relative to map origin (start room center-ish); Main passes room centers from Config
 	SpawnOffsets = {
-		-- Room (3,1) and (1,3) and (3,3) approx — refined in WorldSetup comments / Main
 		Vector3.new(60, 0, 0),
 		Vector3.new(0, 0, 60),
 		Vector3.new(60, 0, 60),
 	},
 }
 
--- HUD / scoring
 Config.HUD = {
 	UpdateInterval = 0.1,
 }
 
--- First-person lock
 Config.Camera = {
 	LockFirstPerson = true,
 	MinZoom = 0.5,
 	MaxZoom = 0.5,
-	EnableMouseLock = false, -- shift-lock optional off
+	EnableMouseLock = false,
+}
+
+Config.Hub = {
+	Title = "CQC ROOM SHOOTER",
+	Subtitle = "Pick a starter weapon, then clear the rooms.",
+	HowTo = "Hold LMB to fire · R reload · Hotbar 1–3 switch guns · Doors open away from you · Jump half-walls · Slide crawl gaps",
 }
 
 -- Remotes (names under ReplicatedStorage.Remotes)
 Config.Remotes = {
 	FireWeapon = "FireWeapon",
-	FireResult = "FireResult", -- server → shooter: hit/miss juice payload
+	FireResult = "FireResult",
 	AmmoUpdate = "AmmoUpdate",
 	KillFeed = "KillFeed",
 	StatsUpdate = "StatsUpdate",
-	ToggleDoor = "ToggleDoor", -- C→S request; server owns door state
+	ToggleDoor = "ToggleDoor",
+	StartMatch = "StartMatch", -- C→S { weaponId: string }
+	MatchStarted = "MatchStarted", -- S→C { weaponId: string }
 }
 
 return Config
