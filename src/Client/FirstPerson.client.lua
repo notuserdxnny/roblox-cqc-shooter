@@ -1,7 +1,9 @@
 --!strict
 --[[
-	Force LockFirstPerson for FPS feel AFTER hub Start / while in match.
-	While CQCInHub (or not CQCInMatch): Classic camera, unlocked mouse for UI.
+	Force LockFirstPerson for FPS feel AFTER countdown GO / while in match.
+	While CQCInHub, CQCMatchOver, or (not in match and not countdown): Classic + unlocked mouse.
+	During CQCCountdown: LockFirstPerson so the arena is visible behind the 3…2…1 overlay
+	(mouse may still be unlocked by Hub for the overlay).
 	Re-applies on CharacterAdded / attribute changes.
 ]]
 
@@ -13,12 +15,26 @@ local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local camCfg = Config.Camera
 
-local function inHub(): boolean
+local function inCountdown(): boolean
+	return player:GetAttribute("CQCCountdown") == true
+end
+
+local function inMatchLive(): boolean
+	return player:GetAttribute("CQCInMatch") == true and player:GetAttribute("CQCMatchOver") ~= true
+end
+
+local function wantsHubCamera(): boolean
+	if player:GetAttribute("CQCMatchOver") == true then
+		return true
+	end
 	if player:GetAttribute("CQCInHub") == true then
 		return true
 	end
-	-- Treat "not in match" as hub for camera/mouse
-	if player:GetAttribute("CQCInMatch") ~= true then
+	-- Countdown uses match (FP) camera
+	if inCountdown() then
+		return false
+	end
+	if not inMatchLive() then
 		return true
 	end
 	return false
@@ -45,7 +61,7 @@ local function applyHubCamera()
 	end
 end
 
-local function applyMatchCamera()
+local function applyMatchCamera(lockMouse: boolean)
 	if camCfg.LockFirstPerson then
 		player.CameraMode = Enum.CameraMode.LockFirstPerson
 	end
@@ -54,8 +70,14 @@ local function applyMatchCamera()
 	pcall(function()
 		player.DevEnableMouseLock = camCfg.EnableMouseLock == true
 	end)
-	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-	UserInputService.MouseIconEnabled = false
+	if lockMouse then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+		UserInputService.MouseIconEnabled = false
+	else
+		-- Countdown: FP view but free mouse so overlay feels clickable / readable
+		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		UserInputService.MouseIconEnabled = true
+	end
 
 	local cam = workspace.CurrentCamera
 	if cam then
@@ -69,24 +91,28 @@ local function applyMatchCamera()
 end
 
 local function applyCamera()
-	if inHub() then
+	if wantsHubCamera() then
 		applyHubCamera()
+	elseif inCountdown() then
+		applyMatchCamera(false)
 	else
-		applyMatchCamera()
+		applyMatchCamera(true)
 	end
 end
 
 applyCamera()
 
-player:GetAttributeChangedSignal("CQCInHub"):Connect(function()
-	applyCamera()
-	task.defer(applyCamera)
-end)
+local function hookAttr(name: string)
+	player:GetAttributeChangedSignal(name):Connect(function()
+		applyCamera()
+		task.defer(applyCamera)
+	end)
+end
 
-player:GetAttributeChangedSignal("CQCInMatch"):Connect(function()
-	applyCamera()
-	task.defer(applyCamera)
-end)
+hookAttr("CQCInHub")
+hookAttr("CQCInMatch")
+hookAttr("CQCCountdown")
+hookAttr("CQCMatchOver")
 
 player.CharacterAdded:Connect(function()
 	applyCamera()
@@ -98,8 +124,7 @@ end)
 task.spawn(function()
 	while true do
 		task.wait(1.5)
-		if inHub() then
-			-- Keep mouse free while hub is up (Roblox may re-lock)
+		if wantsHubCamera() then
 			if UserInputService.MouseBehavior ~= Enum.MouseBehavior.Default then
 				UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 				UserInputService.MouseIconEnabled = true
@@ -107,6 +132,8 @@ task.spawn(function()
 			if player.CameraMode == Enum.CameraMode.LockFirstPerson then
 				applyHubCamera()
 			end
+		elseif inCountdown() then
+			applyMatchCamera(false)
 		else
 			if player.CameraMode ~= Enum.CameraMode.LockFirstPerson and camCfg.LockFirstPerson then
 				applyCamera()

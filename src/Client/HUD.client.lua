@@ -1,8 +1,8 @@
 --!strict
 --[[
-	HUD: health, ammo/bullets, weapon name, kills / OITC score, kill feed, crosshair.
-	Hidden while hub is open (CQCInHub).
-	OITC: shows BULLETS + score / KillsToWin; MELEE when empty.
+	HUD: health, bullets, weapon name, OITC score / KillsToWin, kill feed, crosshair.
+	Hidden while hub is open (CQCInHub) or during end overlay (CQCMatchOver).
+	Visible during countdown / match. OITC-focused (bullets + SCORE n / KillsToWin).
 ]]
 
 local Players = game:GetService("Players")
@@ -137,7 +137,10 @@ hint.Font = Enum.Font.Gotham
 hint.TextSize = 14
 hint.TextColor3 = Color3.fromRGB(230, 230, 240)
 hint.TextStrokeTransparency = 0.5
-hint.Text = "Shotgun · SMG · Pistol · Hold LMB · R reload · Doors · Jump half-walls / slide crawl gaps"
+hint.Text = string.format(
+	"OITC · Pistol · Kill = +1 bullet · Empty = Knife · First to %d · Hold LMB",
+	Config.OITC.KillsToWin
+)
 hint.Parent = gui
 
 local feed = Instance.new("Frame")
@@ -157,31 +160,19 @@ local magSize = 0
 local reloading = false
 local kills = 0
 local weaponName = "—"
-local mode = Config.DefaultMode
+local mode = Config.Modes.OITC
 local oitcScore = 0
 local killsToWin = Config.OITC.KillsToWin
 local meleeReady = false
 
 local function refreshAmmoText()
-	if mode == Config.Modes.OITC then
-		if meleeReady or ammo <= 0 then
-			ammoLabel.Text = "BULLETS 0 — MELEE"
-			ammoLabel.TextColor3 = Color3.fromRGB(255, 120, 100)
-		else
-			ammoLabel.Text = string.format("BULLETS %d", ammo)
-			ammoLabel.TextColor3 = if ammo <= 1
-				then Color3.fromRGB(255, 180, 80)
-				else Color3.fromRGB(255, 220, 120)
-		end
-		return
-	end
-	if reloading then
-		ammoLabel.Text = "RELOADING..."
-		ammoLabel.TextColor3 = Color3.fromRGB(255, 140, 80)
+	if meleeReady or ammo <= 0 then
+		ammoLabel.Text = "BULLETS 0 — MELEE"
+		ammoLabel.TextColor3 = Color3.fromRGB(255, 120, 100)
 	else
-		ammoLabel.Text = string.format("AMMO %d / %d", ammo, magSize)
-		ammoLabel.TextColor3 = if ammo <= 3 and magSize > 0
-			then Color3.fromRGB(255, 100, 100)
+		ammoLabel.Text = string.format("BULLETS %d", ammo)
+		ammoLabel.TextColor3 = if ammo <= 1
+			then Color3.fromRGB(255, 180, 80)
 			else Color3.fromRGB(255, 220, 120)
 	end
 end
@@ -191,36 +182,26 @@ local function refreshWeapon()
 end
 
 local function refreshMode()
-	if mode == Config.Modes.OITC then
-		modeLabel.Text = "MODE ONE IN THE CHAMBER"
-		modeLabel.TextColor3 = Color3.fromRGB(255, 180, 100)
-		hint.Text = string.format(
-			"OITC · Pistol · Kill = +1 bullet · Empty = Knife · First to %d · Hold LMB",
-			killsToWin
-		)
-	else
-		modeLabel.Text = "MODE CASUAL"
-		modeLabel.TextColor3 = Color3.fromRGB(140, 180, 220)
-		hint.Text = "Shotgun · SMG · Pistol · Hold LMB · R reload · Doors · Jump half-walls / slide crawl gaps"
-	end
+	modeLabel.Text = "MODE ONE IN THE CHAMBER"
+	modeLabel.TextColor3 = Color3.fromRGB(255, 180, 100)
+	hint.Text = string.format(
+		"OITC · Pistol · Kill = +1 bullet · Empty = Knife · First to %d · Hold LMB",
+		killsToWin
+	)
 end
 
 local function refreshKills()
-	if mode == Config.Modes.OITC then
-		killsLabel.Text = string.format("SCORE %d / %d", oitcScore, killsToWin)
-		killsLabel.TextColor3 = Color3.fromRGB(255, 210, 120)
-	else
-		killsLabel.Text = string.format("KILLS %d", kills)
-		killsLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
-	end
+	killsLabel.Text = string.format("SCORE %d / %d", oitcScore, killsToWin)
+	killsLabel.TextColor3 = Color3.fromRGB(255, 210, 120)
 end
 
 local function syncHudVisible()
-	local hide = player:GetAttribute("CQCInHub") == true
+	local hide = player:GetAttribute("CQCInHub") == true or player:GetAttribute("CQCMatchOver") == true
 	gui.Enabled = not hide
 end
 syncHudVisible()
 player:GetAttributeChangedSignal("CQCInHub"):Connect(syncHudVisible)
+player:GetAttributeChangedSignal("CQCMatchOver"):Connect(syncHudVisible)
 
 local function bindHumanoid(humanoid: Humanoid)
 	local function update()
@@ -255,7 +236,7 @@ ammoRemote.OnClientEvent:Connect(function(current, max, isReloading, _weaponId, 
 	ammo = current
 	magSize = max
 	reloading = isReloading == true
-	meleeReady = mode == Config.Modes.OITC and ammo <= 0
+	meleeReady = ammo <= 0
 	if typeof(wName) == "string" and wName ~= "" then
 		weaponName = wName
 		refreshWeapon()
@@ -280,7 +261,7 @@ statsRemote.OnClientEvent:Connect(function(stats)
 	end
 	if stats.kills ~= nil then
 		kills = stats.kills
-		if mode == Config.Modes.OITC and stats.oitcScore == nil then
+		if stats.oitcScore == nil then
 			oitcScore = stats.kills
 		end
 	end
@@ -289,9 +270,7 @@ statsRemote.OnClientEvent:Connect(function(stats)
 	end
 	if stats.ammo ~= nil then
 		ammo = stats.ammo
-		if mode == Config.Modes.OITC then
-			meleeReady = ammo <= 0
-		end
+		meleeReady = ammo <= 0
 	end
 	if stats.magSize ~= nil then
 		magSize = stats.magSize
@@ -309,17 +288,21 @@ end)
 
 local killFeedRemote = remotes:WaitForChild(Config.Remotes.KillFeed) :: RemoteEvent
 killFeedRemote.OnClientEvent:Connect(function(killer, victim)
+	local isLocal = tostring(killer) == player.Name
 	local row = Instance.new("TextLabel")
-	row.Size = UDim2.new(1, 0, 0, 22)
-	row.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	row.BackgroundTransparency = 0.45
+	row.Size = UDim2.new(1, 0, 0, 24)
+	row.BackgroundColor3 = if isLocal then Color3.fromRGB(40, 70, 40) else Color3.fromRGB(0, 0, 0)
+	row.BackgroundTransparency = if isLocal then 0.25 else 0.45
 	row.BorderSizePixel = 0
-	row.Font = Enum.Font.Gotham
-	row.TextSize = 14
-	row.TextColor3 = Color3.fromRGB(255, 255, 255)
+	row.Font = Enum.Font.GothamBold
+	row.TextSize = if isLocal then 15 else 14
+	row.TextColor3 = if isLocal then Color3.fromRGB(255, 230, 140) else Color3.fromRGB(255, 255, 255)
 	row.Text = string.format("%s  ✖  %s", tostring(killer), tostring(victim))
 	row.Parent = feed
-	task.delay(4, function()
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 4)
+	corner.Parent = row
+	task.delay(4.5, function()
 		row:Destroy()
 	end)
 end)
