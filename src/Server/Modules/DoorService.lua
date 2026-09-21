@@ -109,6 +109,15 @@ local function tweenDoor(rec: DoorRecord, open: boolean, dir: number?)
 	rec.doorPart.CanCollide = true
 	rec.doorPart.CanQuery = true
 
+	-- Soft door whoosh
+	local snd = Instance.new("Sound")
+	snd.SoundId = (Config.SoundIds and Config.SoundIds.Door) or "rbxassetid://9113895097"
+	snd.Volume = (Config.SoundVolumes and Config.SoundVolumes.Door) or 0.28
+	snd.PlaybackSpeed = if open then 1.05 else 0.9
+	snd.Parent = rec.doorPart
+	snd:Play()
+	game:GetService("Debris"):AddItem(snd, 2)
+
 	local tw = TweenService:Create(rec.doorPart, info, { CFrame = goalCF })
 	tw:Play()
 	tw.Completed:Wait()

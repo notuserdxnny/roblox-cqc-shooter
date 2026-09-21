@@ -56,6 +56,8 @@ local function getRemotes()
 	statsRemote = ensureRemote(Config.Remotes.StatsUpdate)
 end
 
+local PlayerDataService: any = nil
+
 local function bindDeps()
 	if not CombatService then
 		CombatService = require(script.Parent:WaitForChild("CombatService"))
@@ -65,6 +67,9 @@ local function bindDeps()
 	end
 	if not LobbyService then
 		LobbyService = require(script.Parent:WaitForChild("LobbyService"))
+	end
+	if not PlayerDataService then
+		PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService"))
 	end
 end
 
@@ -120,6 +125,12 @@ function GameModeService.PushModeStats(player: Player)
 	end
 	local meleeReady = ammo <= 0
 	local ktw = Config.OITC.KillsToWin
+	local credits = 0
+	if PlayerDataService then
+		credits = PlayerDataService.GetCredits(player)
+	elseif typeof(player:GetAttribute("CQCCredits")) == "number" then
+		credits = player:GetAttribute("CQCCredits") :: number
+	end
 	statsRemote:FireClient(player, {
 		kills = score,
 		oitcScore = score,
@@ -134,6 +145,7 @@ function GameModeService.PushModeStats(player: Player)
 		meleeReady = meleeReady,
 		matchOver = matchOver[player] == true,
 		countdown = player:GetAttribute("CQCCountdown") == true,
+		credits = credits,
 	})
 end
 
@@ -169,6 +181,9 @@ function GameModeService.OnKill(killer: Player, _victimName: string, _viaMelee: 
 	CombatService.AwardOITCAmmo(killer, 1)
 	oitcScore[killer] = (oitcScore[killer] or 0) + 1
 	killer:SetAttribute("CQCOITCScore", oitcScore[killer])
+	if PlayerDataService then
+		PlayerDataService.AddCredits(killer, Config.Economy.CreditsPerKill or 25, "kill")
+	end
 	GameModeService.PushModeStats(killer)
 	local need = Config.OITC.KillsToWin
 	if oitcScore[killer] >= need then
@@ -196,6 +211,14 @@ function GameModeService.EndMatch(winner: Player)
 	end
 
 	LobbyService.FreezeForLobby(winner)
+	if PlayerDataService then
+		PlayerDataService.AddCredits(winner, Config.Economy.CreditsPerWin or 100, "win")
+		for _, plr in Players:GetPlayers() do
+			if plr ~= winner and CombatService.IsInMatch(plr) then
+				PlayerDataService.AddCredits(plr, Config.Economy.CreditsPerMatchPlayed or 10, "match")
+			end
+		end
+	end
 
 	local endFreeze = 1.25
 	if Config.Match and typeof(Config.Match.EndFreezeSeconds) == "number" then
