@@ -92,6 +92,34 @@ pcall(function()
 	Lighting.EnvironmentSpecularScale = 0.25
 end)
 
+-- Gentle post for readable CQC
+local post = Config.Lighting.Post
+if post then
+	local cc = Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+	if not cc then
+		cc = Instance.new("ColorCorrectionEffect")
+		cc.Name = "CQCColorCorrection"
+		cc.Parent = Lighting
+	end
+	if post.ColorCorrection then
+		cc.Brightness = post.ColorCorrection.Brightness or 0.02
+		cc.Contrast = post.ColorCorrection.Contrast or 0.08
+		cc.Saturation = post.ColorCorrection.Saturation or 0.05
+		cc.TintColor = post.ColorCorrection.TintColor or Color3.fromRGB(245, 248, 255)
+	end
+	local bloom = Lighting:FindFirstChildOfClass("BloomEffect")
+	if not bloom then
+		bloom = Instance.new("BloomEffect")
+		bloom.Name = "CQCBloom"
+		bloom.Parent = Lighting
+	end
+	if post.Bloom then
+		bloom.Intensity = post.Bloom.Intensity or 0.35
+		bloom.Size = post.Bloom.Size or 18
+		bloom.Threshold = post.Bloom.Threshold or 1.1
+	end
+end
+
 local floorColors = {
 	Color3.fromRGB(62, 70, 88), -- blue-gray
 	Color3.fromRGB(78, 62, 58), -- warm brick
@@ -444,13 +472,25 @@ for col = 1, cols + 1 do
 end
 
 -- Half-walls (waist-high, jump over) and crawl gaps
+local function addWallTrim(wall: BasePart)
+	local trim = makePart(
+		wall.Name .. "_Trim",
+		Vector3.new(wall.Size.X + 0.15, 0.18, wall.Size.Z + 0.15),
+		wall.CFrame * CFrame.new(0, wall.Size.Y / 2 + 0.05, 0),
+		trimColor,
+		Enum.Material.Metal,
+		wall.Parent
+	)
+	trim.CanCollide = false
+end
+
 local halfWallH = 2.8 -- waist-ish; jumpable
 local crawlOpenH = 3.0 -- opening height at floor for slide/duck
 
 local function placeHalfWalls(col: number, row: number)
 	local c = roomCenter(col, row)
 	-- Two waist-high barriers forming a partial lane
-	makePart(
+	local hwA = makePart(
 		"HalfWall_A",
 		Vector3.new(10, halfWallH, 1.4),
 		CFrame.new(c.X - 4, floorY + halfWallH / 2, c.Z - 5),
@@ -458,7 +498,8 @@ local function placeHalfWalls(col: number, row: number)
 		Enum.Material.Concrete,
 		coverFolder
 	)
-	makePart(
+	addWallTrim(hwA)
+	local hwB = makePart(
 		"HalfWall_B",
 		Vector3.new(1.4, halfWallH, 10),
 		CFrame.new(c.X + 6, floorY + halfWallH / 2, c.Z + 2),
@@ -466,6 +507,7 @@ local function placeHalfWalls(col: number, row: number)
 		Enum.Material.Concrete,
 		coverFolder
 	)
+	addWallTrim(hwB)
 	-- Low crate
 	makePart(
 		"Crate",
@@ -512,7 +554,7 @@ local function placeCrawlGap(col: number, row: number)
 		coverFolder
 	)
 	-- Second half-wall elsewhere in room
-	makePart(
+	local hwC = makePart(
 		"HalfWall_CrawlRoom",
 		Vector3.new(8, halfWallH, 1.3),
 		CFrame.new(c.X + 2, floorY + halfWallH / 2, c.Z - 8),
@@ -520,6 +562,7 @@ local function placeCrawlGap(col: number, row: number)
 		Enum.Material.Concrete,
 		coverFolder
 	)
+	addWallTrim(hwC)
 
 	-- Slide/crawl trigger: briefly lowers HipHeight so players fit under ~3-stud opening
 	local trigger = makePart(
@@ -769,6 +812,84 @@ do
 
 	folder:SetAttribute("LobbyX", lx)
 	folder:SetAttribute("LobbyZ", lz)
+
+	-- Weapon showcase stands (Parts only)
+	local display = Instance.new("Folder")
+	display.Name = "WeaponDisplay"
+	display.Parent = lobbyFolder
+
+	local function stand(name: string, pos: Vector3, color: Color3)
+		local _base = makePart(
+			name .. "Base",
+			Vector3.new(2.2, 0.35, 2.2),
+			CFrame.new(pos),
+			Color3.fromRGB(28, 32, 44),
+			Enum.Material.SmoothPlastic,
+			display
+		)
+		local _pillar = makePart(
+			name .. "Pillar",
+			Vector3.new(0.35, 3.2, 0.35),
+			CFrame.new(pos + Vector3.new(0, 1.7, 0)),
+			Color3.fromRGB(40, 46, 60),
+			Enum.Material.Metal,
+			display
+		)
+		local _plate = makePart(
+			name .. "Plate",
+			Vector3.new(1.6, 0.12, 0.7),
+			CFrame.new(pos + Vector3.new(0, 3.5, 0)) * CFrame.Angles(math.rad(-18), 0, 0),
+			color,
+			Enum.Material.Neon,
+			display
+		)
+		local labelPart = makePart(
+			name .. "LabelAnchor",
+			Vector3.new(0.2, 0.2, 0.2),
+			CFrame.new(pos + Vector3.new(0, 4.1, 0)),
+			Color3.fromRGB(255, 255, 255),
+			Enum.Material.SmoothPlastic,
+			display
+		)
+		labelPart.Transparency = 1
+		labelPart.CanCollide = false
+		local bill = Instance.new("BillboardGui")
+		bill.Size = UDim2.fromOffset(120, 28)
+		bill.StudsOffset = Vector3.new(0, 0.4, 0)
+		bill.AlwaysOnTop = false
+		bill.Parent = labelPart
+		local t = Instance.new("TextLabel")
+		t.Size = UDim2.fromScale(1, 1)
+		t.BackgroundTransparency = 1
+		t.Font = Enum.Font.GothamBold
+		t.TextSize = 14
+		t.TextColor3 = Color3.fromRGB(220, 230, 245)
+		t.TextStrokeTransparency = 0.5
+		t.Text = name
+		t.Parent = bill
+		return plate
+	end
+
+	stand("PISTOL", Vector3.new(lx - 6, ly + 0.2, lz - 4), Color3.fromRGB(220, 200, 80))
+	stand("KNIFE", Vector3.new(lx + 6, ly + 0.2, lz - 4), Color3.fromRGB(220, 40, 40))
+
+	-- Desk / counter for hub feel
+	makePart(
+		"LobbyDesk",
+		Vector3.new(10, 1.2, 2.4),
+		CFrame.new(lx, ly + 1.4, lz - 8),
+		Color3.fromRGB(36, 42, 56),
+		Enum.Material.SmoothPlastic,
+		lobbyFolder
+	)
+	makePart(
+		"LobbyDeskTop",
+		Vector3.new(10.4, 0.2, 2.8),
+		CFrame.new(lx, ly + 2.1, lz - 8),
+		Color3.fromRGB(55, 64, 88),
+		Enum.Material.Metal,
+		lobbyFolder
+	)
 end
 
 print(string.format(

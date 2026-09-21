@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Server entry: remotes, combat, weapons, game modes, doors, NPCs in room complex.
+	Server entry: remotes, combat, weapons, game modes, shop/data, doors, NPCs.
 	Weapons are granted after client Hub StartMatch (not on bare join).
 ]]
 
@@ -34,22 +34,29 @@ ensureRemote(Config.Remotes.MatchStarted)
 ensureRemote(Config.Remotes.MatchEnded)
 ensureRemote(Config.Remotes.ReturnToHub)
 ensureRemote(Config.Remotes.MeleeAttack)
+ensureRemote(Config.Remotes.GetShop)
+ensureRemote(Config.Remotes.PurchaseItem)
+ensureRemote(Config.Remotes.EquipItem)
+ensureRemote(Config.Remotes.CreditsUpdate)
+ensureRemote(Config.Remotes.PlayerDataSync)
+ensureRemote(Config.Remotes.ShopResult)
 
 local Modules = script.Parent:WaitForChild("Modules")
 local CombatService = require(Modules:WaitForChild("CombatService"))
 local WeaponService = require(Modules:WaitForChild("WeaponService"))
 local GameModeService = require(Modules:WaitForChild("GameModeService"))
 local LobbyService = require(Modules:WaitForChild("LobbyService"))
+local ShopService = require(Modules:WaitForChild("ShopService"))
 local NPCService = require(Modules:WaitForChild("NPCService"))
--- DoorService is Init'd by WorldSetup; ensure module loads
 require(Modules:WaitForChild("DoorService"))
 
+-- Shop/Data first so loadout skins can read profiles
+ShopService.Init()
 CombatService.Init()
 WeaponService.Init()
 GameModeService.Init()
 LobbyService.Init()
 
--- Wait for WorldSetup room marks, then spawn NPCs in marked rooms
 task.defer(function()
 	task.wait(0.6)
 	local arena = workspace:FindFirstChild("CQCArena")
@@ -69,4 +76,4 @@ task.defer(function()
 	NPCService.Init(Vector3.new(0, Config.Arena.SpawnHeight, 0))
 end)
 
-print("[CQC] Server Main ready (hub → countdown → OITC only).")
+print("[CQC] Server Main ready (hub shop/inventory · countdown · OITC · detailed tools).")
