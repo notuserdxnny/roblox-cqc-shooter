@@ -1120,6 +1120,21 @@ do
 	)
 end
 
+-- Invisible safety slab under arena + lobby so players never fall into the void
+do
+	local safety = makePart(
+		"VoidSafety",
+		Vector3.new(420, 2, 280),
+		CFrame.new(-40, -18, 20),
+		Color3.fromRGB(10, 10, 14),
+		Enum.Material.SmoothPlastic,
+		folder
+	)
+	safety.Transparency = 1
+	safety.CanQuery = false
+	safety.CanTouch = false
+end
+
 print(string.format(
 	"[CQCArena] Room complex ready — %dx%d rooms, %d doors, lobby + combat pads.",
 	cols,
