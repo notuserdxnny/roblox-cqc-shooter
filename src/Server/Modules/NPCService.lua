@@ -1,11 +1,11 @@
 --!strict
 --[[
 	Combat bots for OITC solo / filler play.
-	Path between room/cover waypoints, acquire InMatch players, fire server
-	raycast pistol shots (OITC one-shot damage), melee when close.
+	Path between room/cover waypoints, acquire live InMatch players (post-countdown),
+	fire server raycast pistol shots with LOS + capped range, melee only with LOS.
+	Spawns snap to floor and avoid landing on players.
 	Player kill of bot → CombatService kill credit (ammo + score + credits).
-	Bot kill of player → optional ammo refill + kill feed.
-	Replaces passive Training Dummies.
+	Bot kill of player → ammo refill + kill feed ("Bot killed you").
 ]]
 
 local Players = game:GetService("Players")
@@ -257,22 +257,97 @@ local function createBot(name: string, position: Vector3): Model
 	return model
 end
 
-local function nextSpawnPosition(): Vector3
-	local offsets = Config.NPC.SpawnOffsets
-	if offsets and #offsets > 0 then
-		spawnIndex = (spawnIndex % #offsets) + 1
-		local off = offsets[spawnIndex]
-		local jitter = Vector3.new((math.random() - 0.5) * 4, 0, (math.random() - 0.5) * 4)
-		if math.abs(off.X) > 5 or math.abs(off.Z) > 5 then
-			return Vector3.new(off.X, arenaCenter.Y, off.Z) + jitter
+local function snapToFloor(xz: Vector3): Vector3
+	local rayH = Config.NPC.SpawnFloorRayHeight or 12
+	local origin = Vector3.new(xz.X, (Config.Map and Config.Map.FloorY or 0) + rayH, xz.Z)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { ensureFolder() }
+	params.IgnoreWater = true
+	local hit = workspace:Raycast(origin, Vector3.new(0, -rayH * 2, 0), params)
+	local hip = 2 -- matches createBot Humanoid.HipHeight
+	if hit then
+		-- Reject ceiling / high hits (spawn inside geometry)
+		local floorY = (Config.Map and Config.Map.FloorY) or 0
+		if hit.Position.Y > floorY + 6 then
+			return Vector3.new(xz.X, floorY + hip + 0.15, xz.Z)
 		end
-		return arenaCenter + Vector3.new(off.X, 0, off.Z) + jitter
+		return Vector3.new(xz.X, hit.Position.Y + hip + 0.15, xz.Z)
 	end
-	return randomWaypoint(nil) + Vector3.new((math.random() - 0.5) * 3, 0, (math.random() - 0.5) * 3)
+	local floorY = (Config.Map and Config.Map.FloorY) or 0
+	return Vector3.new(xz.X, floorY + hip + 0.15, xz.Z)
 end
 
-local function playerInMatch(plr: Player): boolean
-	return plr:GetAttribute("CQCInMatch") == true
+local function tooCloseToPlayers(pos: Vector3): boolean
+	local minSep = Config.NPC.MinSpawnSeparationFromPlayers or 16
+	for _, plr in Players:GetPlayers() do
+		local char = plr.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp and hrp:IsA("BasePart") then
+			local flat = Vector3.new(hrp.Position.X - pos.X, 0, hrp.Position.Z - pos.Z)
+			if flat.Magnitude < minSep then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function candidateFromOffset(off: Vector3): Vector3
+	local jitter = Vector3.new((math.random() - 0.5) * 4, 0, (math.random() - 0.5) * 4)
+	local xz: Vector3
+	if math.abs(off.X) > 5 or math.abs(off.Z) > 5 then
+		xz = Vector3.new(off.X, 0, off.Z) + jitter
+	else
+		xz = arenaCenter + Vector3.new(off.X, 0, off.Z) + jitter
+	end
+	return snapToFloor(xz)
+end
+
+local function nextSpawnPosition(): Vector3
+	local offsets = Config.NPC.SpawnOffsets
+	local tried: { Vector3 } = {}
+	if offsets and #offsets > 0 then
+		for _ = 1, #offsets do
+			spawnIndex = (spawnIndex % #offsets) + 1
+			local pos = candidateFromOffset(offsets[spawnIndex])
+			table.insert(tried, pos)
+			if not tooCloseToPlayers(pos) then
+				return pos
+			end
+		end
+	end
+	for _ = 1, 10 do
+		local wp = randomWaypoint(nil)
+		local pos = snapToFloor(wp + Vector3.new((math.random() - 0.5) * 3, 0, (math.random() - 0.5) * 3))
+		table.insert(tried, pos)
+		if not tooCloseToPlayers(pos) then
+			return pos
+		end
+	end
+	if #tried > 0 then
+		return tried[1]
+	end
+	return snapToFloor(arenaCenter)
+end
+
+--[[
+	Live combat victims only: InMatch, countdown finished, match not over.
+]]
+local function playerCanBeDamaged(plr: Player): boolean
+	if plr:GetAttribute("CQCInMatch") ~= true then
+		return false
+	end
+	if plr:GetAttribute("CQCCountdown") == true then
+		return false
+	end
+	if plr:GetAttribute("CQCMatchOver") == true then
+		return false
+	end
+	if plr:GetAttribute("CQCInHub") == true then
+		return false
+	end
+	return true
 end
 
 local function findTarget(bot: Model): (Player?, BasePart?, number)
@@ -280,13 +355,13 @@ local function findTarget(bot: Model): (Player?, BasePart?, number)
 	if not root then
 		return nil, nil, math.huge
 	end
-	local acquire = Config.NPC.AcquireRange or 72
+	local acquire = Config.NPC.AcquireRange or 42
 	local bestPlr: Player? = nil
 	local bestRoot: BasePart? = nil
 	local bestDist = acquire
 
 	for _, plr in Players:GetPlayers() do
-		if playerInMatch(plr) and plr:GetAttribute("CQCMatchOver") ~= true then
+		if playerCanBeDamaged(plr) then
 			local char = plr.Character
 			if char then
 				local hum = char:FindFirstChildOfClass("Humanoid")
@@ -313,6 +388,11 @@ local function faceToward(root: BasePart, target: Vector3)
 	root.CFrame = CFrame.lookAt(root.Position, flat)
 end
 
+--[[
+	True when nothing solid sits between from→to.
+	Ignore list should include the bot (and optionally the target character when
+	checking "can I see them" — then nil result means clear air to the aim point).
+]]
 local function hasLineOfSight(fromPos: Vector3, toPos: Vector3, ignore: { Instance }): boolean
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -324,7 +404,25 @@ local function hasLineOfSight(fromPos: Vector3, toPos: Vector3, ignore: { Instan
 		return true
 	end
 	local result = workspace:Raycast(fromPos, dir.Unit * dist, params)
+	-- nil = clear air to the aim point (target character should be in ignore list)
 	return result == nil
+end
+
+local function losToPlayer(bot: Model, targetRoot: BasePart, targetChar: Model?): boolean
+	if Config.NPC.RequireLineOfSight == false then
+		return true
+	end
+	local root = bot.PrimaryPart
+	if not root then
+		return false
+	end
+	local eye = root.Position + Vector3.new(0, 1.4, 0)
+	local aim = targetRoot.Position + Vector3.new(0, 1.2, 0)
+	local ignore: { Instance } = { bot }
+	if targetChar then
+		table.insert(ignore, targetChar)
+	end
+	return hasLineOfSight(eye, aim, ignore)
 end
 
 local function announceKill(killerName: string, victimName: string)
@@ -340,6 +438,9 @@ local function botMelee(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 	if not root or not hum or hum.Health <= 0 then
 		return
 	end
+	if not playerCanBeDamaged(targetPlayer) then
+		return
+	end
 	local char = targetPlayer.Character
 	if not char then
 		return
@@ -349,8 +450,12 @@ local function botMelee(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 		return
 	end
 	local dist = (targetRoot.Position - root.Position).Magnitude
-	local meleeRange = Config.NPC.MeleeRange or Config.OITC.MeleeRange or 8
+	local meleeRange = Config.NPC.MeleeRange or Config.OITC.MeleeRange or 7
 	if dist > meleeRange then
+		return
+	end
+	-- Walls / closed doors must block melee (was a major "invisible death" cause)
+	if not losToPlayer(bot, targetRoot, char) then
 		return
 	end
 	faceToward(root, targetRoot.Position)
@@ -371,6 +476,9 @@ local function botFire(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 	if not root or not hum or hum.Health <= 0 then
 		return
 	end
+	if not playerCanBeDamaged(targetPlayer) then
+		return
+	end
 	local ammoAttr = bot:GetAttribute("BotAmmo")
 	local ammo = if typeof(ammoAttr) == "number" then ammoAttr :: number else 0
 	if ammo <= 0 then
@@ -386,6 +494,11 @@ local function botFire(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 		return
 	end
 
+	-- Pre-check LOS (walls / closed doors) before spending the OITC bullet
+	if not losToPlayer(bot, targetRoot, char) then
+		return
+	end
+
 	local muzzle = bot:FindFirstChild("Muzzle")
 	local origin = root.Position + Vector3.new(0, 1.4, 0)
 	if muzzle and muzzle:IsA("BasePart") then
@@ -393,7 +506,7 @@ local function botFire(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 	end
 	local aimPoint = targetRoot.Position + Vector3.new(0, 1.2, 0)
 	local dir = aimPoint - origin
-	local maxRange = Config.NPC.FireRange or 55
+	local maxRange = Config.NPC.FireRange or 36
 	if dir.Magnitude < 0.1 or dir.Magnitude > maxRange then
 		return
 	end
@@ -419,7 +532,9 @@ local function botFire(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 	params.FilterDescendantsInstances = { bot }
 	params.IgnoreWater = true
 
-	local result = workspace:Raycast(origin, dir.Unit * maxRange, params)
+	-- Ray only as far as the target (not past them into open space)
+	local castDist = math.min(maxRange, dir.Magnitude + 1.5)
+	local result = workspace:Raycast(origin, dir.Unit * castDist, params)
 	if not result then
 		return
 	end
@@ -430,7 +545,7 @@ local function botFire(bot: Model, targetPlayer: Player, targetRoot: BasePart)
 	end
 	local hitHum = hitModel:FindFirstChildOfClass("Humanoid")
 	local hitPlr = Players:GetPlayerFromCharacter(hitModel)
-	if hitHum and hitHum.Health > 0 and hitPlr == targetPlayer then
+	if hitHum and hitHum.Health > 0 and hitPlr == targetPlayer and playerCanBeDamaged(targetPlayer) then
 		local dmg = Config.NPC.GunDamage or Config.OITC.GunDamage or 100
 		local before = hitHum.Health
 		hitHum:TakeDamage(dmg)
@@ -508,8 +623,8 @@ local function brainLoop(bot: Model)
 				local targetPlr, targetRoot, dist = findTarget(bot)
 				local now = os.clock()
 				local fireCd = Config.NPC.FireCooldown or 0.85
-				local meleeRange = Config.NPC.MeleeRange or 8
-				local fireRange = Config.NPC.FireRange or 55
+				local meleeRange = Config.NPC.MeleeRange or 7
+				local fireRange = Config.NPC.FireRange or 36
 				local ammoAttr = bot:GetAttribute("BotAmmo")
 				local ammo = if typeof(ammoAttr) == "number" then ammoAttr :: number else 0
 				local hasAmmo = ammo > 0
@@ -526,16 +641,10 @@ local function brainLoop(bot: Model)
 					emptySince = 0
 				end
 
-				if targetPlr and targetRoot then
-					local eye = root.Position + Vector3.new(0, 1.4, 0)
-					local aim = targetRoot.Position + Vector3.new(0, 1.2, 0)
-					local ignoreList: { Instance } = { bot }
-					if targetPlr.Character then
-						table.insert(ignoreList, targetPlr.Character)
-					end
-					local los = hasLineOfSight(eye, aim, ignoreList)
+				if targetPlr and targetRoot and playerCanBeDamaged(targetPlr) then
+					local los = losToPlayer(bot, targetRoot, targetPlr.Character)
 
-					if dist <= meleeRange then
+					if dist <= meleeRange and los then
 						humanoid:MoveTo(targetRoot.Position)
 						if now - lastMelee >= (Config.NPC.MeleeCooldown or 0.55) then
 							lastMelee = now

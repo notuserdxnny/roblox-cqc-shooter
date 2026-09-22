@@ -30,7 +30,7 @@ local function createWeaponTool(def: Config.WeaponDef): Tool
 	tool.Name = def.Name
 	tool.RequiresHandle = true
 	tool.CanBeDropped = false
-	tool.ManualActivationOnly = false
+	tool.ManualActivationOnly = true
 	tool.ToolTip = def.ToolTip
 	tool:SetAttribute("WeaponId", def.Id)
 
@@ -81,7 +81,7 @@ local function createKnifeTool(): Tool
 	tool.Name = Config.OITC.MeleeToolName
 	tool.RequiresHandle = true
 	tool.CanBeDropped = false
-	tool.ManualActivationOnly = false
+	tool.ManualActivationOnly = true
 	tool.ToolTip = Config.Melee.ToolTip
 	tool:SetAttribute("WeaponId", "Melee")
 	tool:SetAttribute("IsMelee", true)
