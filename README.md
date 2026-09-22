@@ -105,14 +105,20 @@ Passive Training Dummies are **replaced** by fighting bots (`NPCService`):
 |----------|--------|
 | Count | **4** (`Config.NPC.Count`) |
 | Movement | Pathfind / MoveTo between room centers, cover, and `BotWaypoints` |
-| Target | Players with `CQCInMatch == true` only (lobby-safe) |
-| Gun | Server raycast pistol, **OITC one-shot** (`GunDamage = 100`), 1 ammo |
-| Melee | When within `MeleeRange` (~8) |
+| Target | Live match only: `CQCInMatch` and **not** countdown / hub / match-over |
+| Gun | Server raycast pistol, **OITC one-shot**, max **~36** studs, **LOS required** (walls/doors block) |
+| Melee | Within `MeleeRange` (~7) **and** clear LOS (no through-wall knife) |
 | Ammo refill | On bot kill of player (`RefillAmmoOnKill`), or after `EmptyAmmoRegenSeconds` |
 | Player kill of bot | Same as player kill: **+1 OITC ammo**, score, Credits, kill feed |
+| Spawn | Floor-snapped marks; avoids spawning on top of players |
 | Respawn | After `RespawnDelay` (default 5s) |
 
 Tune in `Config.NPC`.
+
+## Recent bugfixes
+
+- **Unexplained deaths:** Bots no longer damage during countdown/hub; gun + melee require raycast LOS; engagement range capped for CQC; safer spawn/teleport heights; void rescue + under-map safety slab; kill feed shows **“BotName killed you”** when you die.
+- **Shoot freezes look:** While InMatch, client continuously re-asserts `MouseBehavior = LockCenter` (RenderStepped + InputEnded). Tools use `ManualActivationOnly` so Tool clicks do not unlock the mouse. Recoil remains camera-CFrame-only.
 
 ## Map art (room themes)
 
