@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local player = Players.LocalPlayer
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
@@ -206,4 +207,20 @@ task.spawn(function()
 			end
 		end
 	end
+end)
+
+
+-- Belt-and-suspenders: if any ProximityPrompt GUI appears, re-lock immediately
+-- (door prompts were removed; this covers future prompts / engine edge cases)
+local function onPromptVisibilityChanged()
+	if inMatchLive() then
+		assertMatchMouseLock()
+		task.defer(assertMatchMouseLock)
+	end
+end
+ProximityPromptService.PromptShown:Connect(function(_prompt, _inputType)
+	onPromptVisibilityChanged()
+end)
+ProximityPromptService.PromptHidden:Connect(function(_prompt)
+	onPromptVisibilityChanged()
 end)
