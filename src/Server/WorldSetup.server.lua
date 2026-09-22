@@ -1,7 +1,7 @@
 --!strict
 --[[
 	Builds a CQC room complex: grid of square rooms with doorways,
-	server-tweened doors, waist-high half-walls / crawl gaps, per-room lighting,
+	server-tweened doors (E-key / BillboardGui hint, no ProximityPrompt), waist-high half-walls / crawl gaps, per-room lighting,
 	varied floor colors, spawn in start room, NPC spawn markers.
 ]]
 
@@ -458,14 +458,40 @@ local function createDoor(
 	hinge.Parent = door
 	hinge.WorldCFrame = hingeWorld
 
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "Toggle"
-	prompt.ActionText = "Open"
-	prompt.ObjectText = "Door"
-	prompt.MaxActivationDistance = 8
-	prompt.HoldDuration = 0
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = door
+	-- Non-Active BillboardGui hint — no GuiButton / no mouse capture (FPS LockCenter safe)
+	local hintMax = map.DoorHintMaxDistance or 10
+	local bb = Instance.new("BillboardGui")
+	bb.Name = "DoorHint"
+	bb.Size = UDim2.fromOffset(110, 36)
+	bb.StudsOffsetWorldSpace = Vector3.new(0, size.Y * 0.15, 0)
+	bb.AlwaysOnTop = true
+	bb.MaxDistance = hintMax
+	bb.Active = false
+	bb.ResetOnSpawn = false
+	bb.Parent = door
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Hint"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundColor3 = Color3.fromRGB(12, 14, 20)
+	label.BackgroundTransparency = 0.35
+	label.BorderSizePixel = 0
+	label.Text = "[E] Open"
+	label.TextColor3 = Color3.fromRGB(230, 235, 245)
+	label.TextStrokeTransparency = 0.55
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.Active = false
+	label.Parent = bb
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = label
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingLeft = UDim.new(0, 6)
+	pad.PaddingRight = UDim.new(0, 6)
+	pad.Parent = label
 
 	-- Directional open: DoorService picks ±angle from triggering player side
 	DoorService.RegisterDoor(
@@ -474,7 +500,7 @@ local function createDoor(
 		hingeWorld,
 		closedCFrame,
 		math.rad(map.DoorOpenAngleDegrees),
-		prompt
+		label
 	)
 end
 
