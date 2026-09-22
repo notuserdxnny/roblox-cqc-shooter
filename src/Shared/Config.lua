@@ -229,6 +229,8 @@ Config.Map = {
 	},
 	DoorTweenSeconds = 0.35,
 	DoorOpenAngleDegrees = 95,
+	DoorInteractDistance = 8, -- client E + server range check (no ProximityPrompt)
+	DoorHintMaxDistance = 10, -- BillboardGui MaxDistance for "[E] Open/Close"
 }
 
 Config.Lighting = {
