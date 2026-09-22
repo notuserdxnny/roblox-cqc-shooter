@@ -119,6 +119,7 @@ Tune in `Config.NPC`.
 
 - **Unexplained deaths:** Bots no longer damage during countdown/hub; gun + melee require raycast LOS; engagement range capped for CQC; safer spawn/teleport heights; void rescue + under-map safety slab; kill feed shows **“BotName killed you”** when you die.
 - **Shoot freezes look:** While InMatch, client continuously re-asserts `MouseBehavior = LockCenter` (RenderStepped + InputEnded). Tools use `ManualActivationOnly` so Tool clicks do not unlock the mouse. Recoil remains camera-CFrame-only.
+- **Door prompt unlocks mouse:** Doors no longer use `ProximityPrompt` (its GUI stole LockCenter). Non-Active `[E] Open/Close` BillboardGui + client E / ButtonX → `ToggleDoor` remote; server still picks open direction.
 
 ## Map art (room themes)
 
@@ -171,6 +172,7 @@ roblox-cqc-shooter/
       HUD.client.lua      # strip HUD, kill feed, vignette
       WeaponController.client.lua
       FirstPerson.client.lua
+      DoorInput.client.lua  # E-key door toggle (no ProximityPrompt)
 ```
 
 ## Setup with Rojo
@@ -197,7 +199,7 @@ Studio: new Baseplate → Rojo Connect → **Play**.
 | START | Begin OITC match |
 | Hold LMB | Fire or melee when empty |
 | R | Disabled in OITC |
-| Door prompt | Open away from you / close |
+| E (near door) | Open away from you / close |
 
 ## Config knobs
 
