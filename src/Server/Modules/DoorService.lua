@@ -1,8 +1,8 @@
 --!strict
 --[[
 	Server-authoritative door open/close.
-	WorldSetup registers door models; ProximityPrompt.Triggered tweens
-	door CFrame + CanCollide on the server so all clients see the same state.
+	WorldSetup registers door models; client fires ToggleDoor (E near door).
+	No ProximityPrompt — FPS LockCenter must never unlock on door UI hover.
 
 	Open direction is chosen from the triggering player's side (and facing as
 	tie-break): the leaf swings away from the player so the path clears.
@@ -10,6 +10,7 @@
 
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
@@ -25,14 +26,19 @@ export type DoorRecord = {
 	isOpen: boolean,
 	openDir: number, -- +1 or -1 while open / last used
 	busy: boolean,
-	prompt: ProximityPrompt,
+	hintLabel: TextLabel?,
 }
 
 local doors: { [string]: DoorRecord } = {}
+local toggleRemote: RemoteEvent? = nil
+local remoteConnected = false
+local interactDistance = 8
 
-local function setPromptText(rec: DoorRecord)
-	rec.prompt.ActionText = if rec.isOpen then "Close" else "Open"
-	rec.prompt.ObjectText = "Door"
+local function setHintText(rec: DoorRecord)
+	local label = rec.hintLabel
+	if label then
+		label.Text = if rec.isOpen then "[E] Close" else "[E] Open"
+	end
 end
 
 local function cframeForDir(rec: DoorRecord, dir: number): CFrame
@@ -134,8 +140,50 @@ local function tweenDoor(rec: DoorRecord, open: boolean, dir: number?)
 	end
 	rec.doorPart:SetAttribute("IsOpen", open)
 	rec.doorPart:SetAttribute("OpenDir", rec.openDir)
-	setPromptText(rec)
+	setHintText(rec)
 	rec.busy = false
+end
+
+local function playerWithinRange(player: Player, doorPart: BasePart): boolean
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return false
+	end
+	local delta = root.Position - doorPart.Position
+	-- Slightly taller allowance so crouch / jump still works
+	local flat = Vector3.new(delta.X, 0, delta.Z)
+	return flat.Magnitude <= interactDistance and math.abs(delta.Y) <= interactDistance + 4
+end
+
+local function toggleFromPlayer(player: Player, doorId: string)
+	local r = doors[doorId]
+	if not r then
+		return
+	end
+	if r.busy then
+		return
+	end
+	if not playerWithinRange(player, r.doorPart) then
+		return
+	end
+	-- Only while live match / countdown in arena (not hub overlay)
+	if player:GetAttribute("CQCInHub") == true then
+		return
+	end
+	if player:GetAttribute("CQCMatchOver") == true then
+		return
+	end
+	if player:GetAttribute("CQCInMatch") ~= true and player:GetAttribute("CQCCountdown") ~= true then
+		return
+	end
+
+	if r.isOpen then
+		tweenDoor(r, false, nil)
+	else
+		local dir = chooseOpenDir(r, player)
+		tweenDoor(r, true, dir)
+	end
 end
 
 function DoorService.RegisterDoor(
@@ -144,7 +192,7 @@ function DoorService.RegisterDoor(
 	hingeCFrame: CFrame,
 	closedCFrame: CFrame,
 	openAngleRadians: number,
-	prompt: ProximityPrompt
+	hintLabel: TextLabel?
 )
 	local leafOffset = hingeCFrame:ToObjectSpace(closedCFrame)
 	local rec: DoorRecord = {
@@ -157,31 +205,45 @@ function DoorService.RegisterDoor(
 		isOpen = false,
 		openDir = 1,
 		busy = false,
-		prompt = prompt,
+		hintLabel = hintLabel,
 	}
 	doors[id] = rec
 	doorPart:SetAttribute("DoorId", id)
 	doorPart:SetAttribute("IsOpen", false)
 	doorPart:SetAttribute("OpenDir", 1)
-	setPromptText(rec)
-
-	prompt.Triggered:Connect(function(player: Player)
-		local r = doors[id]
-		if not r then
-			return
-		end
-		if r.isOpen then
-			tweenDoor(r, false, nil)
-		else
-			local dir = chooseOpenDir(r, player)
-			tweenDoor(r, true, dir)
-		end
-	end)
+	setHintText(rec)
 end
 
 function DoorService.Init()
-	-- Doors are registered by WorldSetup as it builds the map.
 	doors = {}
+	interactDistance = (Config.Map and Config.Map.DoorInteractDistance) or 8
+
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	if not remotes then
+		remotes = Instance.new("Folder")
+		remotes.Name = "Remotes"
+		remotes.Parent = ReplicatedStorage
+	end
+	local existing = remotes:FindFirstChild(Config.Remotes.ToggleDoor)
+	if existing and existing:IsA("RemoteEvent") then
+		toggleRemote = existing
+	else
+		local r = Instance.new("RemoteEvent")
+		r.Name = Config.Remotes.ToggleDoor
+		r.Parent = remotes
+		toggleRemote = r
+	end
+
+	assert(toggleRemote)
+	if not remoteConnected then
+		remoteConnected = true
+		toggleRemote.OnServerEvent:Connect(function(player: Player, doorId: unknown)
+			if typeof(doorId) ~= "string" then
+				return
+			end
+			toggleFromPlayer(player, doorId :: string)
+		end)
+	end
 end
 
 return DoorService
