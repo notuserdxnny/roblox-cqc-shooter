@@ -186,6 +186,33 @@ feedLayout.SortOrder = Enum.SortOrder.LayoutOrder
 feedLayout.Padding = UDim.new(0, 5)
 feedLayout.Parent = feed
 
+-- Brief "X killed you" banner so deaths aren't mysterious
+local deathBanner = Instance.new("TextLabel")
+deathBanner.Name = "DeathCause"
+deathBanner.AnchorPoint = Vector2.new(0.5, 0.5)
+deathBanner.Position = UDim2.fromScale(0.5, 0.38)
+deathBanner.Size = UDim2.fromOffset(420, 36)
+deathBanner.BackgroundColor3 = Color3.fromRGB(28, 18, 22)
+deathBanner.BackgroundTransparency = 0.25
+deathBanner.BorderSizePixel = 0
+deathBanner.Font = Theme.FontTitle
+deathBanner.TextSize = 18
+deathBanner.TextColor3 = Theme.Danger
+deathBanner.TextStrokeTransparency = 0.4
+deathBanner.Visible = false
+deathBanner.ZIndex = 30
+deathBanner.Parent = gui
+do
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 8)
+	c.Parent = deathBanner
+	local s = Instance.new("UIStroke")
+	s.Color = Theme.Danger
+	s.Thickness = 1
+	s.Transparency = 0.35
+	s.Parent = deathBanner
+end
+
 local ammo = 0
 local kills = 0
 local weaponName = "Pistol"
@@ -318,10 +345,16 @@ end)
 
 local killFeedRemote = remotes:WaitForChild(Config.Remotes.KillFeed) :: RemoteEvent
 killFeedRemote.OnClientEvent:Connect(function(killer, victim)
-	local isLocal = tostring(killer) == player.Name
+	local killerName = tostring(killer)
+	local victimName = tostring(victim)
+	local isLocalKill = killerName == player.Name
+	local isLocalDeath = victimName == player.Name
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 26)
-	row.BackgroundColor3 = if isLocal then Color3.fromRGB(36, 60, 42) else Theme.Panel
+	row.BackgroundColor3 = if isLocalKill
+		then Color3.fromRGB(36, 60, 42)
+		elseif isLocalDeath then Color3.fromRGB(60, 28, 32)
+		else Theme.Panel
 	row.BackgroundTransparency = 0.2
 	row.BorderSizePixel = 0
 	row.Parent = feed
@@ -329,7 +362,7 @@ killFeedRemote.OnClientEvent:Connect(function(killer, victim)
 	c.CornerRadius = UDim.new(0, 6)
 	c.Parent = row
 	local s = Instance.new("UIStroke")
-	s.Color = if isLocal then Theme.Success else Theme.Stroke
+	s.Color = if isLocalKill then Theme.Success elseif isLocalDeath then Theme.Danger else Theme.Stroke
 	s.Thickness = 1
 	s.Transparency = 0.3
 	s.Parent = row
@@ -337,14 +370,28 @@ killFeedRemote.OnClientEvent:Connect(function(killer, victim)
 	label.BackgroundTransparency = 1
 	label.Size = UDim2.fromScale(1, 1)
 	label.Font = Theme.FontTitle
-	label.TextSize = if isLocal then 13 else 12
-	label.TextColor3 = if isLocal then Theme.Credits else Theme.Text
-	label.Text = string.format("  %s  ▸  %s  ", tostring(killer), tostring(victim))
+	label.TextSize = if isLocalKill or isLocalDeath then 13 else 12
+	label.TextColor3 = if isLocalKill then Theme.Credits elseif isLocalDeath then Theme.Danger else Theme.Text
+	if isLocalDeath then
+		label.Text = string.format("  %s killed you  ", killerName)
+	else
+		label.Text = string.format("  %s  ▸  %s  ", killerName, victimName)
+	end
 	label.TextXAlignment = Enum.TextXAlignment.Right
 	label.Parent = row
 	task.delay(4.5, function()
 		row:Destroy()
 	end)
+
+	if isLocalDeath then
+		deathBanner.Text = string.format("%s killed you", killerName)
+		deathBanner.Visible = true
+		task.delay(2.8, function()
+			if deathBanner.Text == string.format("%s killed you", killerName) then
+				deathBanner.Visible = false
+			end
+		end)
+	end
 end)
 
 local matchStartedRemote = remotes:WaitForChild(Config.Remotes.MatchStarted) :: RemoteEvent

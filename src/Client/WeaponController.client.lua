@@ -14,6 +14,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
+local GuiService = game:GetService("GuiService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -32,6 +33,28 @@ local clientMode = Config.DefaultMode
 local meleeReady = false
 local boundTools: { [Tool]: boolean } = {}
 local watchedContainers: { [Instance]: boolean } = {}
+
+local function inMatchLive(): boolean
+	return player:GetAttribute("CQCInMatch") == true
+		and player:GetAttribute("CQCMatchOver") ~= true
+		and player:GetAttribute("CQCCountdown") ~= true
+		and player:GetAttribute("CQCInHub") ~= true
+end
+
+--[[
+	Never unlock the mouse from weapon code. Tool clicks often flip MouseBehavior
+	to Default; re-assert LockCenter so look keeps working without re-clicking.
+]]
+local function keepMouseLocked()
+	if not inMatchLive() then
+		return
+	end
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	UserInputService.MouseIconEnabled = false
+	pcall(function()
+		GuiService.SelectedObject = nil
+	end)
+end
 
 local feel = Config.Feel
 local soundIds = Config.SoundIds
@@ -632,14 +655,19 @@ local function bindTool(tool: Tool)
 			holding = false
 		end
 	end)
+	-- ManualActivationOnly tools still fire Activated if we call Activate();
+	-- primary path is InputBegan. Never change MouseBehavior to Default here.
 	tool.Activated:Connect(function()
 		if equippedTool == tool then
 			holding = true
+			keepMouseLocked()
 			tryFire()
+			keepMouseLocked()
 		end
 	end)
 	tool.Deactivated:Connect(function()
 		holding = false
+		keepMouseLocked()
 	end)
 end
 
@@ -682,16 +710,24 @@ player.CharacterAdded:Connect(onCharacter)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
+		-- Even if a GUI ate the click, keep mouse locked while live so look doesn't freeze
+		if inMatchLive() then
+			keepMouseLocked()
+		end
 		return
 	end
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		-- Backup path: Tool.Activated can miss under Classic→LockFirstPerson transitions.
-		-- Also makes empty-ammo melee / knife LMB reliable.
+		-- Primary fire path (ManualActivationOnly tools). Never unlock mouse.
 		if player:GetAttribute("CQCInHub") == true or player:GetAttribute("CQCInMatch") ~= true then
 			return
 		end
+		if player:GetAttribute("CQCCountdown") == true then
+			return
+		end
 		holding = true
+		keepMouseLocked()
 		tryFire()
+		keepMouseLocked()
 		return
 	end
 	if input.KeyCode == Enum.KeyCode.R then
@@ -708,6 +744,8 @@ end)
 UserInputService.InputEnded:Connect(function(input, _gameProcessed)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		holding = false
+		keepMouseLocked()
+		task.defer(keepMouseLocked)
 	end
 end)
 
@@ -746,6 +784,9 @@ player:GetAttributeChangedSignal("CQCMode"):Connect(function()
 end)
 
 RunService.RenderStepped:Connect(function()
+	if inMatchLive() then
+		keepMouseLocked()
+	end
 	if holding and (equippedTool or shouldMelee()) then
 		tryFire()
 	end
