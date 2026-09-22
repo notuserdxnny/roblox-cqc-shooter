@@ -249,9 +249,10 @@ Config.NPC = {
 	WalkSpeed = 14,
 	MaxHealth = 100,
 	StartingAmmo = 1,
-	AcquireRange = 72,
-	FireRange = 55,
-	MeleeRange = 8,
+	-- CQC engagement: short enough that bots cannot snipe across the 3x3 grid
+	AcquireRange = 42,
+	FireRange = 36,
+	MeleeRange = 7,
 	GunDamage = 100, -- OITC one-shot
 	MeleeDamage = 100,
 	FireCooldown = 0.85,
@@ -261,6 +262,9 @@ Config.NPC = {
 	EmptyAmmoRegenSeconds = 8, -- if they miss forever, slowly re-arm
 	RespawnDelay = 5,
 	RefillAmmoOnKill = true,
+	RequireLineOfSight = true, -- walls / closed doors block gun + melee
+	MinSpawnSeparationFromPlayers = 16,
+	SpawnFloorRayHeight = 12,
 	SpawnOffsets = {
 		Vector3.new(60, 0, 0),
 		Vector3.new(0, 0, 60),
